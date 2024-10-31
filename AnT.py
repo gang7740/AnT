@@ -3,7 +3,6 @@ from tkinter import filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk, ImageDraw
 import json
 import uuid
-import math
 
 class ImageEditor:
     def __init__(self, root):
@@ -120,8 +119,6 @@ class ImageEditor:
 
         # 리스트박스에 선택 이벤트 바인딩 추가
         self.label_listbox.bind('<<ListboxSelect>>', self.on_list_select)
-
-
 
 
     def move_image(self, dx, dy):
@@ -247,55 +244,10 @@ class ImageEditor:
             self.canvas_width = canvas_width
             self.canvas_height = canvas_height
 
-    def draw_node(self, node, is_parent):
-        # """노드를 그리는 함수, 부모 노드는 진한색, 하위 노드는 연한색으로 표시"""
-        x1, y1, x2, y2 = node['coords']
-        
-        # 부모 노드는 기본 색, 하위 노드는 연한 색상 사용
-        outline_color = "red" if is_parent else "pink"  # 부모는 빨간색, 하위 노드는 분홍색
-        width = 4 if is_parent else 2  # 부모는 두꺼운 테두리, 하위 노드는 얇게
-
-        # 노드 그리기
-        self.canvas.create_rectangle(x1, y1, x2, y2, outline=outline_color, width=width)
-
-        # 노드 텍스트 표시
-        self.canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=node["text"])
-
-        # 하위 노드가 있으면 재귀적으로 그리기
-        for subnode in node["node"]:
-            self.draw_node(subnode, is_parent=False)
-
-
-
-    def select_closest_node(self, x, y):
-        """클릭한 지점과 가장 가까운 노드를 찾고 선택합니다."""
-        closest_node = None
-        min_distance = float("inf")
-
-        # 노드 리스트에서 가장 가까운 노드를 찾기
-        def find_closest(nodes, parent=None):
-            nonlocal closest_node, min_distance
-            for node in nodes:
-                nx, ny = self.get_center(node["coords"])
-                distance = math.sqrt((x - nx) ** 2 + (y - ny) ** 2)
-                if distance < min_distance:
-                    min_distance = distance
-                    closest_node = node
-                if "node" in node:
-                    find_closest(node["node"], parent=node)
-        
-        # 최상위 노드부터 검색 시작
-        find_closest(self.nodes)
-        return closest_node
-
 
     def update_canvas(self):
         self.canvas.delete("all")
         self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self.tk_image)
-
-        # 최상위 노드부터 시작하여 재귀적으로 하위 노드를 그립니다
-        for node in self.nodes:
-            self.draw_node(node, is_parent=True)
 
         # 노드 그리기
         for i, node_info in enumerate(self.nodes):
@@ -379,46 +331,17 @@ class ImageEditor:
         if save_path and self.image:
             self.image.save(save_path)
 
-    def get_enclosed_nodes(self, x1, y1, x2, y2):
-    # """좌표가 포함된 기존 노드들을 찾아 반환"""
-        enclosed_nodes = []
-        for node in self.nodes:
-            nx1, ny1, nx2, ny2 = node["coords"]
-            # 새로운 노드가 기존 노드를 모두 포함하고 있는지 확인
-            if x1 <= nx1 <= x2 and y1 <= ny1 <= y2 and x1 <= nx2 <= x2 and y1 <= ny2 <= y2:
-                enclosed_nodes.append(node)
-        return enclosed_nodes
-
-   
-
-    # 하위 노드 추가 함수 정의
-    def create_subnode(self, parent_node, subnode_text, coords):
-        subnode_info = {
-            "id": str(uuid.uuid4()),
-            "coords": coords,
-            "text": subnode_text,
-        }
-        parent_node["subnodes"].append(subnode_info)
-
-    # JSON 저장 메서드 수정 (하위 노드 구조를 "node"로 저장)
     def save_nodes_as_json(self):
-        def serialize_node(node):
-            return {
-                "id": node["id"],
-                "coords": node["coords"],
-                "text": node["text"],
-                "node": [serialize_node(subnode) for subnode in node["node"]]
-            }
-
         save_path = filedialog.asksaveasfilename(defaultextension=".json")
         if save_path:
+            unique_nodes = {tuple(node['coords']): node for node in self.nodes}
+            unique_connections = {tuple((rel['from'], rel['to'])): rel for rel in self.connections}
             data = {
-                "node": [serialize_node(node) for node in self.nodes],
-                "connections": self.connections
+                'node': list(unique_nodes.values()),
+                'connections': list(unique_connections.values())
             }
             with open(save_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
-
 
     def delete_selected(self):
         selected_index = self.label_listbox.curselection()
@@ -562,27 +485,22 @@ class ImageEditor:
 
 
     def on_click(self, event):
+        self.start_x = event.x
+        self.start_y = event.y
         current_mode = self.mode_var.get()
-
-        if current_mode == "draw":
-            self.start_x = event.x
-            self.start_y = event.y
-            self.dragging = True
-        elif current_mode == "connect":
-            # 클릭 위치와 가장 가까운 노드 선택
-            clicked_node = self.select_closest_node(event.x, event.y)
-            if clicked_node:
+        
+        if current_mode == "connect":
+            clicked_node = self.get_node_at(event.x, event.y)
+            if clicked_node is not None:
                 if len(self.selected_nodes) < 2:
                     self.selected_nodes.append(clicked_node)
-                    self.highlight_node(clicked_node)  # 선택된 노드 시각화
+                    if len(self.selected_nodes) == 1:
+                        self.highlight_node(clicked_node)
+
                 if len(self.selected_nodes) == 2:
                     self.create_connection()
         else:
-            # 노드 선택 및 드래그 시작 설정
-            self.selected_node = self.select_closest_node(event.x, event.y)
-            if self.selected_node:
-                self.dragging = True
-
+            self.dragging = True
 
     def on_drag(self, event):
         if self.mode_var.get() == "draw" and self.dragging:
@@ -594,56 +512,17 @@ class ImageEditor:
                 tags="temp_shape"
             )
 
-    def create_node(self, text, x1, y1, x2, y2, parent_node=None):
-        node_info = {
-            "id": str(uuid.uuid4()),
-            "coords": [x1, y1, x2, y2],
-            "text": text,
-            "node": []  # 하위 노드 저장
-        }
-        # 부모 노드에 하위 노드 추가
-        if parent_node:
-            parent_node["node"].append(node_info)
-        else:
-            self.nodes.append(node_info)
-
-        self.update_canvas()
-
-    def get_parent_node(self, x1, y1, x2, y2):
-        # """좌표가 포함된 부모 노드를 찾는 함수"""
-        for node in self.nodes:
-            nx1, ny1, nx2, ny2 = node["coords"]
-            if nx1 <= x1 <= nx2 and ny1 <= y1 <= ny2:
-                return node
-        return None
-
     def on_release(self, event):
-    # """드래그 후 노드가 그려진 후 텍스트를 입력하도록 요청"""
         if self.mode_var.get() == "draw" and self.dragging:
             if abs(event.x - self.start_x) > 5 and abs(event.y - self.start_y) > 5:
-                # 임시 모양 제거 및 노드 그리기
                 self.canvas.delete("temp_shape")
-
-                # 노드가 그려진 후 텍스트 입력 요청
                 text = simpledialog.askstring("Input", "텍스트를 입력하세요:")
                 if text:
-                    # 새로 그려진 노드 생성
                     node_info = {
-                        "id": str(uuid.uuid4()),
+                        "id": str(uuid.uuid4()),  # 고유 id 추가
                         "coords": (self.start_x, self.start_y, event.x, event.y),
-                        "text": text,
-                        "node": []  # 하위 노드 리스트
+                        "text": text
                     }
-
-                    # 새 노드가 포함하는 기존 노드들 찾기
-                    enclosed_nodes = self.get_enclosed_nodes(self.start_x, self.start_y, event.x, event.y)
-                    
-                    # 기존 노드들을 하위 노드로 설정 및 nodes 리스트에서 제거
-                    for enclosed_node in enclosed_nodes:
-                        node_info["node"].append(enclosed_node)
-                        self.nodes.remove(enclosed_node)
-
-                    # 새 노드를 nodes에 추가
                     self.nodes.append(node_info)
                     self.label_listbox.insert(tk.END, f"Node: {text}")
                     self.update_canvas()
@@ -651,7 +530,7 @@ class ImageEditor:
         self.dragging = False
         self.start_x = None
         self.start_y = None
-
+        self.update_canvas()
 
 
     def load_image(self):
