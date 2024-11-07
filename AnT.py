@@ -120,6 +120,24 @@ class ImageEditor:
         # 리스트박스에 선택 이벤트 바인딩 추가
         self.label_listbox.bind('<<ListboxSelect>>', self.on_list_select)
 
+        # 확대/축소 관련 변수
+        self.scale_factor = 1.0
+        self.zoom_step = 0.1  # 확대/축소 단계
+        
+        # 확대/축소 이벤트 바인딩
+        self.canvas.bind("<Control-MouseWheel>", self.zoom)
+        self.canvas.bind("<Motion>", self.on_motion)
+
+
+
+    def zoom(self, event):
+        # 확대/축소 비율 계산
+        if event.delta > 0:  # 마우스 휠 업 -> 확대
+            self.scale_factor += self.zoom_step
+        elif event.delta < 0:  # 마우스 휠 다운 -> 축소
+            self.scale_factor = max(0.1, self.scale_factor - self.zoom_step)  # 축소 한계 설정
+        
+        self.update_canvas()
 
     def move_image(self, dx, dy):
     # """Move the image by (dx, dy) without affecting other items on the canvas."""
@@ -261,72 +279,92 @@ class ImageEditor:
 
     def update_canvas(self):
         self.canvas.delete("all")
-        self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self.tk_image)
+        
+        # 이미지 크기 조정
+        if self.tk_image:
+            img_width, img_height = int(self.image.width * self.scale_factor), int(self.image.height * self.scale_factor)
+            resized_image = self.image.resize((img_width, img_height), Image.LANCZOS)
+            self.tk_image = ImageTk.PhotoImage(resized_image)
+            
+            # 중앙에 이미지 그리기
+            self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self.tk_image)
+        
+        # 확대/축소된 노드 그리기
+        for i, node_info in enumerate(self.nodes):
+            # 원본 좌표에서 확대/축소 및 이미지 위치를 기준으로 좌표 변환
+            x1, y1, x2, y2 = node_info['coords']
+            scaled_coords = (
+                self.img_x + x1 * self.scale_factor,
+                self.img_y + y1 * self.scale_factor,
+                self.img_x + x2 * self.scale_factor,
+                self.img_y + y2 * self.scale_factor
+            )
+            
+            outline_color = "yellow" if i == self.selected_item_index else "red"
+            width = 4 if i == self.selected_item_index else 3
+            self.canvas.create_rectangle(scaled_coords, outline=outline_color, width=width)
+            
+            # 텍스트 위치도 변환된 좌표에 맞춰 중앙에 배치
+            self.canvas.create_text(
+                (scaled_coords[0] + scaled_coords[2]) / 2,
+                (scaled_coords[1] + scaled_coords[3]) / 2,
+                text=node_info["text"]
+            )
 
-        # 부모-자식 관계에 기반한 노드 그리기
-        def draw_node_with_parent(node):
-            x1, y1, x2, y2 = node['coords']
-            outline_color = "blue" if node == self.selected_node else "red"
-            self.canvas.create_rectangle(x1, y1, x2, y2, outline=outline_color, width=3)
-            self.canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=node["text"])
-
-        # 부모-자식 관계에 따라 노드를 그리기 위해 정렬
-        for node in self.nodes:
-            if node["parent_id"] is None:
-                draw_node_with_parent(node)
-
-                # 하위 노드를 그릴 때 부모-자식 관계를 시각적으로 표현
-                for child_node in self.nodes:
-                    if child_node["parent_id"] == node["id"]:
-                        draw_node_with_parent(child_node)
-
-        # 연결 그리기 (이전과 동일)
+        # 확대/축소된 연결 그리기
         for connection in self.connections:
-            from_node = next((n for n in self.nodes if n["id"] == connection["from"]), None)
-            to_node = next((n for n in self.nodes if n["id"] == connection["to"]), None)
-            if from_node and to_node:
-                self.canvas.create_line(
-                    self.get_center(from_node["coords"]),
-                    self.get_center(to_node["coords"]),
-                    arrow=tk.LAST,
-                    fill="black",
-                    width=2
-                )
-
-        # 연결 그리기
-        for i, connection in enumerate(self.connections):
             from_node = next((node for node in self.nodes if node['id'] == connection['from']), None)
             to_node = next((node for node in self.nodes if node['id'] == connection['to']), None)
+            
+            # 연결할 노드가 없으면 스킵
+            if not from_node or not to_node:
+                continue
 
-            if from_node and to_node:
-                # type에 따른 스타일 설정
-                if connection['type'] == "dashed":
-                    line_dash = (4, 2)  # 대시 형태로 표현 (길이 6, 간격 4)
-                elif connection['type'] == "dotted":
-                    line_dash = (2, 1)  # 도트 형태로 표현 (길이 1, 간격 4)
-                else:
-                    line_dash = ()  # 빈 튜플로 설정해 실선으로 표현
+            # from_node와 to_node의 중심 좌표 계산 및 확대/축소
+            from_center = self.get_center(from_node['coords'])
+            to_center = self.get_center(to_node['coords'])
+            
+            # 이미지 위치와 확대/축소 적용
+            scaled_from_center = (
+                self.img_x + from_center[0] * self.scale_factor,
+                self.img_y + from_center[1] * self.scale_factor
+            )
+            scaled_to_center = (
+                self.img_x + to_center[0] * self.scale_factor,
+                self.img_y + to_center[1] * self.scale_factor
+            )
+            
+            # 연결선의 스타일 설정
+            if connection['type'] == "dashed":
+                line_dash = (4, 2)
+            elif connection['type'] == "dotted":
+                line_dash = (2, 1)
+            else:
+                line_dash = ()  # 실선
 
-                # 선택된 경우 스타일 강조
-                is_selected = (i + len(self.nodes)) == self.selected_item_index
-                line_color = "green" if is_selected else "black"
-                width = 4 if is_selected else 2
+            # 선택된 경우 스타일 강조
+            is_selected = (self.connections.index(connection) + len(self.nodes)) == self.selected_item_index
+            line_color = "green" if is_selected else "black"
+            width = 4 if is_selected else 2
 
-                # 화살표 그리기
-                self.canvas.create_line(
-                    self.get_center(from_node['coords']),
-                    self.get_center(to_node['coords']),
-                    arrow=tk.LAST,
-                    fill=line_color,
-                    width=width,
-                    dash=line_dash if line_dash else None  # 스타일 설정 적용
-                )
+            # 화살표 그리기
+            self.canvas.create_line(
+                scaled_from_center,
+                scaled_to_center,
+                arrow=tk.LAST,
+                fill=line_color,
+                width=width,
+                dash=line_dash if line_dash else None
+            )
 
-                # 관계 텍스트가 있는 경우 텍스트도 함께 그리기
-                if connection['text']:
-                    mid_x = (self.get_center(from_node['coords'])[0] + self.get_center(to_node['coords'])[0]) // 2
-                    mid_y = (self.get_center(from_node['coords'])[1] + self.get_center(to_node['coords'])[1]) // 2
-                    self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue")
+            # 관계 텍스트가 있는 경우 텍스트도 함께 그리기
+            if connection['text']:
+                mid_x = (scaled_from_center[0] + scaled_to_center[0]) / 2
+                mid_y = (scaled_from_center[1] + scaled_to_center[1]) / 2
+                self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue")
+
+
+
 
 
             
@@ -471,12 +509,24 @@ class ImageEditor:
 
     def highlight_node(self, node_index):
         node_info = self.nodes[node_index]
+        x1, y1, x2, y2 = node_info['coords']
+        
+        # 확대/축소 및 이미지 위치를 반영한 좌표로 변환
+        scaled_coords = (
+            self.img_x + x1 * self.scale_factor,
+            self.img_y + y1 * self.scale_factor,
+            self.img_x + x2 * self.scale_factor,
+            self.img_y + y2 * self.scale_factor
+        )
+        
+        # 변환된 좌표로 사각형 하이라이트 생성
         self.canvas.create_rectangle(
-            node_info['coords'],
+            scaled_coords,
             outline="blue",
             width=3,
             tags="highlight"
         )
+
 
     def setup_type_selector(self):
         # 관계 타입 선택 메뉴
@@ -547,6 +597,7 @@ class ImageEditor:
         current_mode = self.mode_var.get()
         
         if current_mode == "connect":
+            # 연결 모드일 때만 클릭한 노드를 가져옴
             clicked_node = self.get_node_at(event.x, event.y)
             if clicked_node is not None:
                 if len(self.selected_nodes) < 2:
@@ -556,10 +607,12 @@ class ImageEditor:
 
                 if len(self.selected_nodes) == 2:
                     self.create_connection()
-        else:
+        elif current_mode == "draw":
+            # Draw Node 모드일 때 드래그 시작
             self.dragging = True
 
     def on_drag(self, event):
+        # draw 모드일 때만 임시 사각형을 그려줌
         if self.mode_var.get() == "draw" and self.dragging:
             self.canvas.delete("temp_shape")
             self.canvas.create_rectangle(
@@ -569,20 +622,41 @@ class ImageEditor:
                 tags="temp_shape"
             )
 
+    def on_motion(self, event):
+        original_x = (event.x - self.img_x) / self.scale_factor
+        original_y = (event.y - self.img_y) / self.scale_factor
+        
+        # 변환된 좌표를 사용하여 마우스 위치에 있는 노드 찾기
+        hovered_node_index = self.get_node_at(original_x, original_y)
+        
+        # 현재 하이라이트된 노드와 다르면 업데이트
+        if hovered_node_index != self.selected_item_index:
+            self.selected_item_index = hovered_node_index
+            self.update_canvas()  # 하이라이트 업데이트를 위해 캔버스 다시 그림
+
+
     def on_release(self, event):
+        # Draw Node 모드에서 드래그 종료 시 노드 추가
         if self.mode_var.get() == "draw" and self.dragging:
             if abs(event.x - self.start_x) > 5 and abs(event.y - self.start_y) > 5:
                 self.canvas.delete("temp_shape")
+
+                # 드래그로 그린 좌표를 원본 이미지 좌표로 변환
+                original_x1 = (self.start_x - self.img_x) / self.scale_factor
+                original_y1 = (self.start_y - self.img_y) / self.scale_factor
+                original_x2 = (event.x - self.img_x) / self.scale_factor
+                original_y2 = (event.y - self.img_y) / self.scale_factor
+
+                # 노드 추가를 위한 대화 상자 표시
                 text = simpledialog.askstring("Input", "텍스트를 입력하세요:")
                 if text:
-                    node_id = str(uuid.uuid4())  # 고유 ID 생성
+                    node_id = str(uuid.uuid4())
                     node_info = {
                         "id": node_id,
-                        "coords": (self.start_x, self.start_y, event.x, event.y),
+                        "coords": (original_x1, original_y1, original_x2, original_y2),
                         "text": text,
-                        "parent_id": None  # 초기에는 상위 노드가 없음
+                        "parent_id": None
                     }
-
                     # 포함된 노드의 부모 ID를 새 노드의 ID로 업데이트
                     for other_node in self.nodes:
                         x1, y1, x2, y2 = node_info["coords"]
@@ -597,7 +671,6 @@ class ImageEditor:
         self.dragging = False
         self.start_x = None
         self.start_y = None
-        self.update_canvas()
 
 
 
