@@ -1,1 +1,1 @@
-Infgor graphic Image의 관계를 주요시한 Annotation Tool
+Infographic Image의 관계를 주요 시한 Annotation Tool
