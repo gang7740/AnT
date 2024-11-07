@@ -244,20 +244,54 @@ class ImageEditor:
             self.canvas_width = canvas_width
             self.canvas_height = canvas_height
 
+    def update_label_listbox(self):
+        self.label_listbox.delete(0, tk.END)
+
+        def add_node_with_indent(node, indent=""):
+            self.label_listbox.insert(tk.END, f"{indent}Node: {node['text']}")
+            for child in self.nodes:
+                if child["parent_id"] == node["id"]:
+                    add_node_with_indent(child, indent + "  ")
+
+        # 루트 노드부터 시작
+        for node in self.nodes:
+            if node["parent_id"] is None:
+                add_node_with_indent(node)
+
 
     def update_canvas(self):
         self.canvas.delete("all")
         self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self.tk_image)
 
-        # 노드 그리기
-        for i, node_info in enumerate(self.nodes):
-            outline_color = "yellow" if i == self.selected_item_index else "red"
-            width = 4 if i == self.selected_item_index else 3
-            self.canvas.create_rectangle(
-                node_info['coords'],
-                outline=outline_color,
-                width=width
-            )
+        # 부모-자식 관계에 기반한 노드 그리기
+        def draw_node_with_parent(node):
+            x1, y1, x2, y2 = node['coords']
+            outline_color = "blue" if node == self.selected_node else "red"
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline=outline_color, width=3)
+            self.canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=node["text"])
+
+        # 부모-자식 관계에 따라 노드를 그리기 위해 정렬
+        for node in self.nodes:
+            if node["parent_id"] is None:
+                draw_node_with_parent(node)
+
+                # 하위 노드를 그릴 때 부모-자식 관계를 시각적으로 표현
+                for child_node in self.nodes:
+                    if child_node["parent_id"] == node["id"]:
+                        draw_node_with_parent(child_node)
+
+        # 연결 그리기 (이전과 동일)
+        for connection in self.connections:
+            from_node = next((n for n in self.nodes if n["id"] == connection["from"]), None)
+            to_node = next((n for n in self.nodes if n["id"] == connection["to"]), None)
+            if from_node and to_node:
+                self.canvas.create_line(
+                    self.get_center(from_node["coords"]),
+                    self.get_center(to_node["coords"]),
+                    arrow=tk.LAST,
+                    fill="black",
+                    width=2
+                )
 
         # 연결 그리기
         for i, connection in enumerate(self.connections):
@@ -331,17 +365,40 @@ class ImageEditor:
         if save_path and self.image:
             self.image.save(save_path)
 
+    import json
+
     def save_nodes_as_json(self):
+        # 부모 노드와 자식 노드를 중첩된 형태로 구성
+        def build_hierarchy(nodes):
+            node_dict = {node['id']: node for node in nodes}
+            
+            # 모든 노드에 빈 "node" 리스트를 추가하여 기본 구조 설정
+            for node in nodes:
+                node["node"] = []
+
+            # 각 노드에 대해 부모-자식 관계를 설정
+            for node in nodes:
+                if node["parent_id"]:
+                    parent_node = node_dict.get(node["parent_id"])
+                    if parent_node:
+                        parent_node["node"].append(node)
+
+            # 최상위 노드만 반환
+            return [node for node in nodes if node["parent_id"] is None]
+
+        # 중첩된 노드 구조 생성
+        nested_nodes = build_hierarchy(self.nodes)
+
+        # JSON 파일로 저장
         save_path = filedialog.asksaveasfilename(defaultextension=".json")
         if save_path:
-            unique_nodes = {tuple(node['coords']): node for node in self.nodes}
-            unique_connections = {tuple((rel['from'], rel['to'])): rel for rel in self.connections}
             data = {
-                'node': list(unique_nodes.values()),
-                'connections': list(unique_connections.values())
+                "node": nested_nodes,
+                "connections": self.connections  # 연결 관계도 추가
             }
             with open(save_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
+
 
     def delete_selected(self):
         selected_index = self.label_listbox.curselection()
@@ -518,11 +575,21 @@ class ImageEditor:
                 self.canvas.delete("temp_shape")
                 text = simpledialog.askstring("Input", "텍스트를 입력하세요:")
                 if text:
+                    node_id = str(uuid.uuid4())  # 고유 ID 생성
                     node_info = {
-                        "id": str(uuid.uuid4()),  # 고유 id 추가
+                        "id": node_id,
                         "coords": (self.start_x, self.start_y, event.x, event.y),
-                        "text": text
+                        "text": text,
+                        "parent_id": None  # 초기에는 상위 노드가 없음
                     }
+
+                    # 포함된 노드의 부모 ID를 새 노드의 ID로 업데이트
+                    for other_node in self.nodes:
+                        x1, y1, x2, y2 = node_info["coords"]
+                        nx1, ny1, nx2, ny2 = other_node["coords"]
+                        if x1 <= nx1 <= x2 and y1 <= ny1 <= y2 and x1 <= nx2 <= x2 and y1 <= ny2 <= y2:
+                            other_node["parent_id"] = node_id
+
                     self.nodes.append(node_info)
                     self.label_listbox.insert(tk.END, f"Node: {text}")
                     self.update_canvas()
@@ -531,6 +598,18 @@ class ImageEditor:
         self.start_x = None
         self.start_y = None
         self.update_canvas()
+
+
+
+    # get_enclosed_nodes 메서드
+    def get_enclosed_nodes(self, x1, y1, x2, y2):
+        """지정된 좌표 범위 내에 있는 노드들을 찾습니다."""
+        enclosed_nodes = []
+        for node in self.nodes:
+            nx1, ny1, nx2, ny2 = node["coords"]
+            if x1 <= nx1 <= x2 and y1 <= ny1 <= y2 and x1 <= nx2 <= x2 and y1 <= ny2 <= y2:
+                enclosed_nodes.append(node)
+        return enclosed_nodes
 
 
     def load_image(self):
