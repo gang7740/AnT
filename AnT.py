@@ -196,9 +196,8 @@ class ImageEditor:
                     }
                     self.nodes.append(node_data)
                     
-                    # Listbox에 노드를 추가
-                    indent = "  " if parent_id else ""
-                    self.label_listbox.insert(tk.END, f"{indent}Node({node['id']}): {node['text']}")
+                    # Listbox에 노드를 추가 (들여쓰기 없이)
+                    self.label_listbox.insert(tk.END, f"Node({node['id']}): {node['text']}")
 
                     # 재귀 호출로 하위 노드 탐색
                     parse_nodes(node["node"], node["id"])
@@ -206,8 +205,16 @@ class ImageEditor:
             # 최상위 노드 목록을 재귀적으로 파싱
             parse_nodes(data.get("node", []))
 
-            # 연결 정보를 그대로 가져오기
+            # connections를 불러와 Listbox에 추가
             self.connections = data.get("connections", [])
+            for connection in self.connections:
+                from_id = connection['from']
+                to_id = connection['to']
+                direction_icon = "→" if connection['direction'] else "←"
+                text = connection['text'] or ""
+                connection_type = connection['type']
+                display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
+                self.label_listbox.insert(tk.END, display_text)
 
             # 이미지 파일 이름 추출 및 여러 확장자 탐색
             base_name = os.path.splitext(os.path.basename(json_path))[0]
@@ -236,6 +243,8 @@ class ImageEditor:
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load JSON file: {e}")
+
+
 
 
 

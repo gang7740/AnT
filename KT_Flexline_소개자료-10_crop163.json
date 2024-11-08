@@ -1,0 +1,29 @@
+{
+    "node": [
+        {
+            "id": "8cc",
+            "coords": [
+                573.0,
+                223.0,
+                839.0,
+                455.0
+            ],
+            "text": "aaa",
+            "parent_id": null,
+            "node": []
+        },
+        {
+            "id": "cc8",
+            "coords": [
+                976.0,
+                217.0,
+                1132.0,
+                375.0
+            ],
+            "text": "bbb",
+            "parent_id": null,
+            "node": []
+        }
+    ],
+    "connections": []
+}
