@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk, ImageDraw
 import json
+import os
 import uuid
 
 class ImageEditor:
@@ -19,7 +20,7 @@ class ImageEditor:
 
         # 투명도 슬라이더 설정
         self.opacity_slider = tk.Scale(self.top_frame, from_=0, to=255, orient=tk.HORIZONTAL, label="Transparency")
-        self.opacity_slider.set(255)  # 기본 값 255 (완전히 불투명)
+        self.opacity_slider.set(128)  # 기본 값 255 (완전히 불투명)
         self.opacity_slider.pack(fill=tk.X)
 
         # 비율 유지 체크박스 설정
@@ -109,10 +110,11 @@ class ImageEditor:
         self.opacity_slider.bind("<Motion>", self.adjust_opacity)
 
         # 기존 화살표 키 이벤트 바인딩을 통합된 함수로 수정
-        self.root.bind("<Up>", lambda event: self.move_image(0, -5))
-        self.root.bind("<Down>", lambda event: self.move_image(0, 5))
-        self.root.bind("<Left>", lambda event: self.move_image(-5, 0))
-        self.root.bind("<Right>", lambda event: self.move_image(5, 0))
+        move_step = 20
+        self.root.bind("<Up>", lambda event: self.move_image(0, -move_step))
+        self.root.bind("<Down>", lambda event: self.move_image(0, move_step))
+        self.root.bind("<Left>", lambda event: self.move_image(-move_step, 0))
+        self.root.bind("<Right>", lambda event: self.move_image(move_step, 0))
 
         # 선택된 항목 하이라이트를 위한 변수 추가
         self.selected_item_index = None
@@ -127,6 +129,43 @@ class ImageEditor:
         # 확대/축소 이벤트 바인딩
         self.canvas.bind("<Control-MouseWheel>", self.zoom)
         self.canvas.bind("<Motion>", self.on_motion)
+
+         # Toggle Direction 버튼 추가
+        self.toggle_direction_button = tk.Button(self.right_frame, text="Toggle Direction", command=self.toggle_direction)
+        self.toggle_direction_button.pack(padx=10, pady=5)
+
+         # Bind Ctrl+S to save JSON file with image base name
+        self.root.bind('<Control-s>', self.save_nodes_as_json)
+
+        # Initialize image path variable
+        self.image_path = None
+
+    def toggle_direction(self):
+        selected_index = self.label_listbox.curselection()
+        if not selected_index:
+            messagebox.showinfo("Info", "방향을 변경할 연결을 선택하세요.")
+            return
+
+        selected_index = selected_index[0]
+        if selected_index >= len(self.nodes):  # 연결만 선택되었는지 확인
+            connection_index = selected_index - len(self.nodes)
+            
+            # `direction` 필드를 토글
+            if 0 <= connection_index < len(self.connections):
+                self.connections[connection_index]['direction'] = not self.connections[connection_index]['direction']
+                
+                # 리스트박스 업데이트
+                from_id = self.connections[connection_index]['from']
+                to_id = self.connections[connection_index]['to']
+                text = self.connections[connection_index]['text'] or ""
+                connection_type = self.connections[connection_index]['type'] or ""
+                direction_icon = "→" if self.connections[connection_index]['direction'] else "-"
+                display_text = f"Relation: {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
+                self.label_listbox.delete(selected_index)
+                self.label_listbox.insert(selected_index, display_text)
+             
+            
+            self.update_canvas()
 
 
 
@@ -213,9 +252,16 @@ class ImageEditor:
             )
 
     def load_image(self):
-        image_path = filedialog.askopenfilename()
-        if image_path:
-            self.original_image = Image.open(image_path).convert("RGBA")
+        self.image_path = filedialog.askopenfilename()
+        if self.image_path:
+            # 새로운 이미지를 불러오면 기존 데이터 초기화
+            self.nodes.clear()
+            self.connections.clear()
+            self.label_listbox.delete(0, tk.END)
+            self.selected_item_index = None
+
+            # 이미지 불러오기
+            self.original_image = Image.open(self.image_path).convert("RGBA")
             self.update_image()
 
     def update_image(self):
@@ -276,6 +322,16 @@ class ImageEditor:
             if node["parent_id"] is None:
                 add_node_with_indent(node)
 
+        # 연결 관계 추가
+        for connection in self.connections:
+            from_id = connection['from']
+            to_id = connection['to']
+            direction_icon = "→" if connection['direction'] else "←"
+            text = connection['text'] or ""
+            connection_type = connection['type']
+            display_text = f"Relation: {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
+            self.label_listbox.insert(tk.END, display_text)
+
 
     def update_canvas(self):
         self.canvas.delete("all")
@@ -308,7 +364,8 @@ class ImageEditor:
             self.canvas.create_text(
                 (scaled_coords[0] + scaled_coords[2]) / 2,
                 (scaled_coords[1] + scaled_coords[3]) / 2,
-                text=node_info["text"]
+                text=node_info["text"],
+                font=("Arial", 14)
             )
 
         # 확대/축소된 연결 그리기
@@ -336,7 +393,7 @@ class ImageEditor:
             
             # 연결선의 스타일 설정
             if connection['type'] == "dashed":
-                line_dash = (4, 2)
+                line_dash = (6, 2)
             elif connection['type'] == "dotted":
                 line_dash = (2, 1)
             else:
@@ -361,7 +418,7 @@ class ImageEditor:
             if connection['text']:
                 mid_x = (scaled_from_center[0] + scaled_to_center[0]) / 2
                 mid_y = (scaled_from_center[1] + scaled_to_center[1]) / 2
-                self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue")
+                self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue", font=("Arial", 14))
 
 
 
@@ -403,39 +460,37 @@ class ImageEditor:
         if save_path and self.image:
             self.image.save(save_path)
 
-    import json
+    
 
-    def save_nodes_as_json(self):
-        # 부모 노드와 자식 노드를 중첩된 형태로 구성
-        def build_hierarchy(nodes):
-            node_dict = {node['id']: node for node in nodes}
-            
-            # 모든 노드에 빈 "node" 리스트를 추가하여 기본 구조 설정
-            for node in nodes:
-                node["node"] = []
+    def save_nodes_as_json(self, event=None):
+        if self.image_path:
+            # 이미지 파일명에서 확장자를 제거한 기본 이름 가져오기
+            base_name = os.path.splitext(os.path.basename(self.image_path))[0]
+            json_path = os.path.join(os.path.dirname(self.image_path), f"{base_name}.json")
 
-            # 각 노드에 대해 부모-자식 관계를 설정
-            for node in nodes:
-                if node["parent_id"]:
-                    parent_node = node_dict.get(node["parent_id"])
-                    if parent_node:
-                        parent_node["node"].append(node)
+            # 중첩된 노드 구조 생성
+            def build_hierarchy(nodes):
+                node_dict = {node['id']: node for node in nodes}
+                for node in nodes:
+                    node["node"] = []
+                for node in nodes:
+                    if node["parent_id"]:
+                        parent_node = node_dict.get(node["parent_id"])
+                        if parent_node:
+                            parent_node["node"].append(node)
+                return [node for node in nodes if node["parent_id"] is None]
 
-            # 최상위 노드만 반환
-            return [node for node in nodes if node["parent_id"] is None]
+            nested_nodes = build_hierarchy(self.nodes)
 
-        # 중첩된 노드 구조 생성
-        nested_nodes = build_hierarchy(self.nodes)
-
-        # JSON 파일로 저장
-        save_path = filedialog.asksaveasfilename(defaultextension=".json")
-        if save_path:
-            data = {
-                "node": nested_nodes,
-                "connections": self.connections  # 연결 관계도 추가
-            }
-            with open(save_path, 'w', encoding='utf-8') as f:
+            # JSON 데이터 저장
+            data = {"node": nested_nodes, "connections": self.connections}
+            with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
+
+            messagebox.showinfo("Save JSON", f"JSON 파일이 다음 경로에 저장되었습니다: {json_path}")
+        else:
+            messagebox.showwarning("Save Error", "먼저 이미지를 불러오세요.")
+
 
 
     def delete_selected(self):
@@ -443,39 +498,41 @@ class ImageEditor:
         if not selected_index:
             messagebox.showinfo("Info", "삭제할 항목을 선택하세요.")
             return
-    
+
         selected_index = selected_index[0]
         item_text = self.label_listbox.get(selected_index)
-    
+
         # 선택된 항목이 노드인지 관계인지 확인
         if item_text.startswith("Node:"):
             # 노드의 인덱스를 구하고 nodes에서 삭제
             node_index = selected_index
-            del self.nodes[node_index]
-    
-            # 노드와 관련된 관계들도 삭제
-            self.connections = [
-                rel for rel in self.connections if rel['from'] != node_index and rel['to'] != node_index
+            node_id = self.nodes[node_index]["id"]  # 삭제할 노드의 ID를 먼저 저장
+            
+            # 관련된 모든 connection 항목을 connections 리스트와 label_listbox에서 제거
+            connections_to_remove = [
+                i for i, rel in enumerate(self.connections)
+                if rel['from'] == node_id or rel['to'] == node_id
             ]
-    
-            # Listbox에서 해당 항목 삭제
+
+            # Listbox에서 해당 노드 항목 삭제
             self.label_listbox.delete(selected_index)
-    
-            # 관계 인덱스 업데이트를 위해 남은 노드들에 대한 관계 업데이트
-            for rel in self.connections:
-                if rel['from'] > node_index:
-                    rel['from'] -= 1
-                if rel['to'] > node_index:
-                    rel['to'] -= 1
+            
+            # connections 리스트와 label_listbox에서 해당 항목 삭제
+            for i in reversed(connections_to_remove):
+                del self.connections[i]
+                self.label_listbox.delete(i + len(self.nodes))  # connections는 nodes 다음에 위치
+
+            # 노드 리스트에서 삭제
+            del self.nodes[node_index]
 
         elif item_text.startswith("Relation:"):
             # 관계의 인덱스를 구하고 connections에서 삭제
             relation_index = selected_index - len(self.nodes)
             del self.connections[relation_index]
-    
+
             # Listbox에서 해당 항목 삭제
             self.label_listbox.delete(selected_index)
-    
+
         # 캔버스 업데이트
         self.update_canvas()
 
@@ -490,22 +547,46 @@ class ImageEditor:
         item_text = self.label_listbox.get(selected_index)
 
         if item_text.startswith("Node:"):
-            new_text = simpledialog.askstring("Edit", "새 텍스트를 입력하세요:", initialvalue=item_text[5:])
+            # 선택된 항목이 노드일 경우 텍스트 수정
+            node_index = selected_index  # 노드 인덱스를 리스트 인덱스로 사용
+            new_text = simpledialog.askstring("Edit", "새 텍스트를 입력하세요:", initialvalue=self.nodes[node_index]['text'])
             if new_text:
-                self.nodes[selected_index]['text'] = new_text
+                self.nodes[node_index]['text'] = new_text
                 self.label_listbox.delete(selected_index)
                 self.label_listbox.insert(selected_index, f"Node: {new_text}")
+
         elif item_text.startswith("Relation:"):
-            messagebox.showinfo("Info", "관계 항목은 수정할 수 없습니다.")
+            # 선택된 항목이 관계일 경우 텍스트 수정
+            connection_index = selected_index - len(self.nodes)  # 노드 개수를 빼서 관계 인덱스로 변환
+            if 0 <= connection_index < len(self.connections):
+                current_text = self.connections[connection_index]['text'] or ""
+                new_text = simpledialog.askstring("Edit", "새 텍스트를 입력하세요:", initialvalue=current_text)
+                if new_text:
+                    self.connections[connection_index]['text'] = new_text
+                    from_id = self.connections[connection_index]['from']
+                    to_id = self.connections[connection_index]['to']
+                    direction_icon = "→" if self.connections[connection_index]['direction'] else "←"
+                    connection_type = self.connections[connection_index]['type']
+                    
+                    # 업데이트된 텍스트로 리스트박스 항목 갱신
+                    display_text = f"Relation: {from_id} {direction_icon} {to_id} ({new_text}) [Type: {connection_type}]"
+                    self.label_listbox.delete(selected_index)
+                    self.label_listbox.insert(selected_index, display_text)
 
         self.update_canvas()
 
     def get_node_at(self, x, y):
+        # 실제 클릭 좌표를 원본 이미지 좌표계로 변환
+        original_x = (x - self.img_x) / self.scale_factor
+        original_y = (y - self.img_y) / self.scale_factor
+        
         for i, node_info in enumerate(self.nodes):
             x1, y1, x2, y2 = node_info['coords']
-            if x1 <= x <= x2 and y1 <= y <= y2:
+            # 원본 좌표계에서 클릭한 위치가 노드 안에 있는지 확인
+            if x1 <= original_x <= x2 and y1 <= original_y <= y2:
                 return i
         return None
+
 
     def highlight_node(self, node_index):
         node_info = self.nodes[node_index]
@@ -532,7 +613,6 @@ class ImageEditor:
         # 관계 타입 선택 메뉴
         self.type_label = tk.Label(self.right_frame, text="Change Connection Type:")
         self.type_label.pack(pady=(20, 5))
-
         self.type_options = ["line", "dashed", "dotted", "unknown"]
         self.selected_type = tk.StringVar(value="line")  # 기본값 설정
         self.type_menu = tk.OptionMenu(self.right_frame, self.selected_type, *self.type_options, command=self.update_type)
@@ -554,7 +634,7 @@ class ImageEditor:
                 from_id = self.connections[selected_index]['from']
                 to_id = self.connections[selected_index]['to']
                 text = self.connections[selected_index]['text'] or ""
-                self.label_listbox.insert(selected_index + len(self.nodes), f"Relation: {from_id} to {to_id} ({text}) [Type: {selected_type}]")
+                self.label_listbox.insert(selected_index + len(self.nodes), f"Relation: {from_id} → {to_id} ({text}) [Type: {selected_type}]")
                 
                 # 업데이트 후 화면 다시 그리기
                 self.update_canvas()
@@ -573,16 +653,18 @@ class ImageEditor:
 
             # 관계 정보 저장 (기본 type은 'line')
             connection_type = self.selected_type.get()  # 현재 선택된 타입
+            connection_id = str(uuid.uuid4())[:3]  # 고유 id 추가
             self.connections.append({
-                'id': str(uuid.uuid4()),  # 고유 id 추가
+                'id': connection_id,
                 'from': from_node_id,
                 'to': to_node_id,
                 'text': connection_text,
-                'type': connection_type  # 선택된 type 설정
+                'type': connection_type,  # 선택된 type 설정
+                'direction': True,  # 기본 값 True로 설정, 쉼표 추가
             })
 
             # 리스트박스에 표시할 텍스트 설정
-            display_text = f"Relation: {from_node_id} to {to_node_id} ({connection_text or ''}) [Type: {connection_type}]"
+            display_text = f"Relation: {from_node_id} → {to_node_id} ({connection_text or ''}) [Type: {connection_type}]"
             self.label_listbox.insert(tk.END, display_text)
 
         self.selected_nodes = []
@@ -650,7 +732,7 @@ class ImageEditor:
                 # 노드 추가를 위한 대화 상자 표시
                 text = simpledialog.askstring("Input", "텍스트를 입력하세요:")
                 if text:
-                    node_id = str(uuid.uuid4())
+                    node_id = str(uuid.uuid4())[:3] 
                     node_info = {
                         "id": node_id,
                         "coords": (original_x1, original_y1, original_x2, original_y2),
@@ -684,18 +766,6 @@ class ImageEditor:
                 enclosed_nodes.append(node)
         return enclosed_nodes
 
-
-    def load_image(self):
-        image_path = filedialog.askopenfilename()
-        if image_path:
-            self.original_image = Image.open(image_path).convert("RGBA")
-    
-            # 이미지 크기에 맞게 캔버스 크기를 조정
-            img_width, img_height = self.original_image.size
-            self.canvas.config(width=img_width, height=img_height)
-    
-            # 이미지를 캔버스에 그리기
-            self.update_image()
 
 
 if __name__ == "__main__":
