@@ -1,9 +1,57 @@
 import tkinter as tk
-from tkinter import filedialog, simpledialog, messagebox
+from tkinter import filedialog, messagebox, Toplevel, Text, Button
 from PIL import Image, ImageTk, ImageDraw
 import json
 import os
 import uuid
+
+
+# Define a custom multi-line text input dialog
+class MultiLineInputDialog:
+    def __init__(self, parent, title="Input", initial_text=""):
+        self.dialog = Toplevel(parent)
+        self.dialog.title(title)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        # Create a larger Text widget for multi-line input
+        self.text = Text(self.dialog, width=40, height=10, wrap="word")
+        self.text.insert("1.0", initial_text)  # insert initial text if any
+        self.text.pack(padx=10, pady=10)
+        self.text.focus_set()  # Focus on input when dialog opens
+
+        # Button to confirm input
+        self.confirm_button = Button(self.dialog, text="OK", command=self.confirm)
+        self.confirm_button.pack(pady=5)
+
+        # Binding Shift+Return for new line without other actions
+        self.text.bind("<Shift-Return>", self.insert_newline)
+
+        # Binding Return to confirm() for submitting and closing the dialog
+        self.text.bind("<Return>", self.on_return)
+
+        self.result = None
+
+    def insert_newline(self, event):
+        # Insert a single newline and prevent other actions
+        self.text.insert("insert", "\n")
+        return "break"
+
+    def on_return(self, event):
+        # Confirm input and close dialog
+        self.confirm()
+        return "break"
+
+    def confirm(self):
+        # Get text input, remove trailing newline, and close the dialog
+        self.result = self.text.get("1.0", "end-1c")
+        self.dialog.destroy()
+
+    def show(self):
+        self.dialog.wait_window()
+        return self.result
+    
+
 
 class ImageEditor:
     def __init__(self, root):
@@ -120,6 +168,9 @@ class ImageEditor:
         # type_selector 초기화
         self.setup_type_selector()
 
+    def prompt_multiline_text(self, title="Input", initial_text=""):
+            dialog = MultiLineInputDialog(self.root, title, initial_text)
+            return dialog.show()
 
     def toggle_direction(self):
         selected_index = self.label_listbox.curselection()
@@ -141,7 +192,7 @@ class ImageEditor:
                 text = self.connections[connection_index]['text'] or ""
                 connection_type = self.connections[connection_index]['type'] or ""
                 direction_icon = "→" if self.connections[connection_index]['direction'] else "-"
-                display_text = f"Relation: {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
+                display_text = f"Connection: {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
                 self.label_listbox.delete(selected_index)
                 self.label_listbox.insert(selected_index, display_text)
              
@@ -278,25 +329,27 @@ class ImageEditor:
         self.label_listbox.delete(0, tk.END)
 
         def add_node_with_indent(node, indent=""):
-            self.label_listbox.insert(tk.END, f"{indent}Node: {node['text']}")
+            # Display the node with its ID
+            self.label_listbox.insert(tk.END, f"{indent}Node({node['id']}): {node['text']}")
             for child in self.nodes:
                 if child["parent_id"] == node["id"]:
                     add_node_with_indent(child, indent + "  ")
 
-        # 루트 노드부터 시작
+        # Start with root nodes
         for node in self.nodes:
             if node["parent_id"] is None:
                 add_node_with_indent(node)
 
-        # 연결 관계 추가
+        # Display each connection with ID
         for connection in self.connections:
             from_id = connection['from']
             to_id = connection['to']
             direction_icon = "→" if connection['direction'] else "←"
             text = connection['text'] or ""
             connection_type = connection['type']
-            display_text = f"Relation: {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
+            display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
             self.label_listbox.insert(tk.END, display_text)
+
 
 
     def update_canvas(self):
@@ -331,7 +384,7 @@ class ImageEditor:
                 (scaled_coords[0] + scaled_coords[2]) / 2,
                 (scaled_coords[1] + scaled_coords[3]) / 2,
                 text=node_info["text"],
-                font=("Arial", 14)
+                font=("Arial", 12)
             )
 
         # 확대/축소된 연결 그리기
@@ -384,7 +437,7 @@ class ImageEditor:
             if connection['text']:
                 mid_x = (scaled_from_center[0] + scaled_to_center[0]) / 2
                 mid_y = (scaled_from_center[1] + scaled_to_center[1]) / 2
-                self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue", font=("Arial", 14))
+                self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue", font=("Arial", 12))
 
 
 
@@ -403,7 +456,7 @@ class ImageEditor:
             if item_text.startswith("Node:"):
                 # 노드 인덱스를 설정
                 self.selected_item_index = selected_index
-            elif item_text.startswith("Relation:"):
+            elif item_text.startswith("Connection:"):
                 # 관계 인덱스 설정
                 connection_index = selected_index - len(self.nodes)
                 if 0 <= connection_index < len(self.connections):
@@ -491,7 +544,7 @@ class ImageEditor:
             # 노드 리스트에서 삭제
             del self.nodes[node_index]
 
-        elif item_text.startswith("Relation:"):
+        elif item_text.startswith("Connection:"):
             # 관계의 인덱스를 구하고 connections에서 삭제
             relation_index = selected_index - len(self.nodes)
             del self.connections[relation_index]
@@ -521,13 +574,14 @@ class ImageEditor:
                 messagebox.showerror("Error", "Invalid node index.")
                 return
 
-            new_text = simpledialog.askstring("Edit", "새 텍스트를 입력하세요:", initialvalue=self.nodes[node_index]['text'])
+            # Use MultiLineInputDialog for editing with existing text as the initial value
+            new_text = self.prompt_multiline_text("Edit Node Text", initial_text=self.nodes[node_index]['text'])
             if new_text:
                 self.nodes[node_index]['text'] = new_text
                 self.label_listbox.delete(selected_index)
                 self.label_listbox.insert(selected_index, f"Node: {new_text}")
 
-        elif item_text.startswith("Relation:"):
+        elif item_text.startswith("Connection:"):
             # 선택된 항목이 관계일 경우 텍스트 수정
             connection_index = selected_index - len(self.nodes)  # 노드 개수를 빼서 관계 인덱스로 변환
             
@@ -537,7 +591,8 @@ class ImageEditor:
                 return
 
             current_text = self.connections[connection_index]['text'] or ""
-            new_text = simpledialog.askstring("Edit", "새 텍스트를 입력하세요:", initialvalue=current_text)
+            # Use MultiLineInputDialog for editing connection text
+            new_text = self.prompt_multiline_text("Edit Connection Text", initial_text=current_text)
             if new_text:
                 self.connections[connection_index]['text'] = new_text
                 from_id = self.connections[connection_index]['from']
@@ -546,11 +601,12 @@ class ImageEditor:
                 connection_type = self.connections[connection_index]['type']
                 
                 # 업데이트된 텍스트로 리스트박스 항목 갱신
-                display_text = f"Relation: {from_id} {direction_icon} {to_id} ({new_text}) [Type: {connection_type}]"
+                display_text = f"Connection: {from_id} {direction_icon} {to_id} ({new_text}) [Type: {connection_type}]"
                 self.label_listbox.delete(selected_index)
                 self.label_listbox.insert(selected_index, display_text)
 
         self.update_canvas()
+
 
 
     def get_node_at(self, x, y):
@@ -612,18 +668,26 @@ class ImageEditor:
                 from_id = self.connections[selected_index]['from']
                 to_id = self.connections[selected_index]['to']
                 text = self.connections[selected_index]['text'] or ""
-                self.label_listbox.insert(selected_index + len(self.nodes), f"Relation: {from_id} → {to_id} ({text}) [Type: {selected_type}]")
+                self.label_listbox.insert(selected_index + len(self.nodes), f"Connection: {from_id} → {to_id} ({text}) [Type: {selected_type}]")
                 
                 # 업데이트 후 화면 다시 그리기
                 self.update_canvas()
 
 
+    # prompt_multiline_text 메서드에서 MultiLineInputDialog를 호출
+    def prompt_multiline_text(self, title="Input", initial_text=""):
+        dialog = MultiLineInputDialog(self.root, title, initial_text)
+        return dialog.show()
+
 
     def create_connection(self):
         if self.selected_nodes[0] != self.selected_nodes[1]:
-            connection_text = simpledialog.askstring("Input", "Enter text for this connection (optional):")
-            if not connection_text:
-                connection_text = None  # 입력이 없으면 None으로 설정
+            # MultiLineInputDialog를 사용하여 연결 텍스트 입력
+            connection_text = self.prompt_multiline_text("Enter text for this connection (optional):")
+            
+            # 텍스트가 없을 경우 None으로 설정하고, 그렇지 않으면 JSON-friendly 형식으로 변환
+            connection_text_json = connection_text.replace("\n", "\\n") if connection_text else None
+            connection_text_display = connection_text if connection_text else ""
 
             # from_node와 to_node의 id를 가져와서 저장
             from_node_id = self.nodes[self.selected_nodes[0]]['id']
@@ -636,18 +700,20 @@ class ImageEditor:
                 'id': connection_id,
                 'from': from_node_id,
                 'to': to_node_id,
-                'text': connection_text,
+                'text': connection_text_json,  # JSON 저장 시 줄바꿈을 '\n'으로 처리된 텍스트 사용
                 'type': connection_type,  # 선택된 type 설정
-                'direction': True,  # 기본 값 True로 설정, 쉼표 추가
+                'direction': True,  # 기본 값 True로 설정
             })
 
-            # 리스트박스에 표시할 텍스트 설정
-            display_text = f"Relation: {from_node_id} → {to_node_id} ({connection_text or ''}) [Type: {connection_type}]"
+            # 리스트박스에 표시할 텍스트 설정 (화면에는 줄바꿈 그대로 표시)
+            display_text = f"Connection({connection_id}): {from_node_id} → {to_node_id} ({connection_text_display}) [Type: {connection_type}]"
             self.label_listbox.insert(tk.END, display_text)
 
+        # 선택 해제 및 업데이트
         self.selected_nodes = []
         self.canvas.delete("highlight")
         self.update_canvas()
+
 
 
 
@@ -695,37 +761,39 @@ class ImageEditor:
             self.update_canvas()  # 하이라이트 업데이트를 위해 캔버스 다시 그림
 
 
+     # Update where text input is required
     def on_release(self, event):
-        # Draw Node 모드에서 드래그 종료 시 노드 추가
+        # Draw Node mode with multi-line text input
         if self.mode_var.get() == "draw" and self.dragging:
             if abs(event.x - self.start_x) > 5 and abs(event.y - self.start_y) > 5:
                 self.canvas.delete("temp_shape")
 
-                # 드래그로 그린 좌표를 원본 이미지 좌표로 변환
+                # Convert drag coordinates to image coordinates
                 original_x1 = (self.start_x - self.img_x) / self.scale_factor
                 original_y1 = (self.start_y - self.img_y) / self.scale_factor
                 original_x2 = (event.x - self.img_x) / self.scale_factor
                 original_y2 = (event.y - self.img_y) / self.scale_factor
 
-                # 노드 추가를 위한 대화 상자 표시
-                text = simpledialog.askstring("Input", "텍스트를 입력하세요:")
+                # Use the custom dialog for multi-line text input
+                text = self.prompt_multiline_text("Enter Text for Node")
                 if text:
-                    node_id = str(uuid.uuid4())[:3] 
+                    node_id = str(uuid.uuid4())[:3]
                     node_info = {
                         "id": node_id,
                         "coords": (original_x1, original_y1, original_x2, original_y2),
                         "text": text,
                         "parent_id": None
                     }
-                    # 포함된 노드의 부모 ID를 새 노드의 ID로 업데이트
+                    # Assign parent_id if enclosing other nodes
                     for other_node in self.nodes:
                         x1, y1, x2, y2 = node_info["coords"]
                         nx1, ny1, nx2, ny2 = other_node["coords"]
                         if x1 <= nx1 <= x2 and y1 <= ny1 <= y2 and x1 <= nx2 <= x2 and y1 <= ny2 <= y2:
                             other_node["parent_id"] = node_id
 
-                    self.nodes.append(node_info)
-                    self.label_listbox.insert(tk.END, f"Node: {text}")
+                    self.nodes.append(node_info)                
+                    self.label_listbox.insert(tk.END, f"Node({node_id}): {text}")
+
                     self.update_canvas()
 
         self.dragging = False
