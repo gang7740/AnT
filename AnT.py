@@ -20,26 +20,18 @@ class ImageEditor:
 
         # 투명도 슬라이더 설정
         self.opacity_slider = tk.Scale(self.top_frame, from_=0, to=255, orient=tk.HORIZONTAL, label="Transparency")
-        self.opacity_slider.set(128)  # 기본 값 255 (완전히 불투명)
+        self.opacity_slider.set(128)  # 기본 값 128
         self.opacity_slider.pack(fill=tk.X)
+        self.opacity_slider.bind("<Motion>", self.adjust_opacity)
 
         # 비율 유지 체크박스 설정
-        self.keep_aspect_ratio = tk.BooleanVar(value=True)  # 이미지 비율 유지 여부
-        self.aspect_ratio_checkbox = tk.Checkbutton(
-            self.top_frame, text="Keep Aspect Ratio", variable=self.keep_aspect_ratio
-        )
+        self.keep_aspect_ratio = tk.BooleanVar(value=True)
+        self.aspect_ratio_checkbox = tk.Checkbutton(self.top_frame, text="Keep Aspect Ratio", variable=self.keep_aspect_ratio)
         self.aspect_ratio_checkbox.pack()
 
         # 캔버스 설정
         self.canvas = tk.Canvas(self.left_frame, bg="white")
         self.canvas.pack(fill=tk.BOTH, expand=True)
-        self.canvas_width = 0
-        self.canvas_height = 0
-
-        # type_selector 초기화
-        self.setup_type_selector()
-
-        # 창 크기 조정 시 이미지 리사이징
         self.canvas.bind("<Configure>", self.on_resize)
 
         # 메뉴 바 설정
@@ -50,12 +42,8 @@ class ImageEditor:
         file_menu.add_command(label="Open Image", command=self.load_image)
         file_menu.add_command(label="Save Image", command=self.save_image)
         file_menu.add_command(label="Save Nodes and Connections as JSON", command=self.save_nodes_as_json)
-
-        # 창 닫기 메뉴 추가
-        file_menu.add_separator()  # 구분선 추가
-        file_menu.add_command(label="Exit", command=self.on_closing)  # 창 닫기 메뉴
-
-        # 창 닫기 처리 (윈도우 기본 닫기 버튼)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.on_closing)
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # 모드 선택 버튼
@@ -67,17 +55,20 @@ class ImageEditor:
         self.draw_mode_btn.pack(side=tk.LEFT, padx=5)
         self.connect_mode_btn.pack(side=tk.LEFT, padx=5)
 
-        # 노드 목록 박스 설정
+        # 노드 목록 박스 및 버튼 설정
         self.label_listbox = tk.Listbox(self.right_frame, width=40, height=20)
         self.label_listbox.pack(padx=10, pady=10)
-
-        # 삭제 버튼 설정
+        self.label_listbox.bind('<<ListboxSelect>>', self.on_list_select)
+        
         self.delete_button = tk.Button(self.right_frame, text="Delete Selected", command=self.delete_selected)
         self.delete_button.pack(padx=10, pady=5)
-
-        # 수정 버튼 설정
+        
         self.edit_button = tk.Button(self.right_frame, text="Edit Selected", command=self.edit_selected)
         self.edit_button.pack(padx=10, pady=5)
+        
+        # Toggle Direction 버튼 추가
+        self.toggle_direction_button = tk.Button(self.right_frame, text="Toggle Direction", command=self.toggle_direction)
+        self.toggle_direction_button.pack(padx=10, pady=5)
 
         # 이미지 및 도형 관련 변수 초기화
         self.image = None
@@ -93,52 +84,42 @@ class ImageEditor:
         self.dragging = False
         self.scale_x = 1
         self.scale_y = 1
-
-        # 이미지 이동 관련 변수
-        self.img_x = 0  # 이미지의 현재 X 위치
-        self.img_y = 0  # 이미지의 현재 Y 위치
+        self.img_x = 0
+        self.img_y = 0
         self.drag_data = {"x": 0, "y": 0}
 
         # 이벤트 바인딩
         self.canvas.bind("<Button-1>", self.on_click)
         self.canvas.bind("<B1-Motion>", self.on_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
-        self.canvas.bind("<Button-3>", self.on_right_click)  # 오른쪽 클릭으로 노드 이동 시작
-        self.canvas.bind("<B3-Motion>", self.on_node_drag)  # 오른쪽 버튼 드래그
-        self.canvas.bind("<ButtonRelease-3>", self.end_node_drag)  # 오른쪽 버튼 놓기
+        self.canvas.bind("<Button-3>", self.on_right_click)
+        self.canvas.bind("<B3-Motion>", self.on_node_drag)
+        self.canvas.bind("<ButtonRelease-3>", self.end_node_drag)
 
-        self.opacity_slider.bind("<Motion>", self.adjust_opacity)
-
-        # 기존 화살표 키 이벤트 바인딩을 통합된 함수로 수정
+        # 키보드 화살표로 이미지 이동 설정
         move_step = 20
         self.root.bind("<Up>", lambda event: self.move_image(0, -move_step))
         self.root.bind("<Down>", lambda event: self.move_image(0, move_step))
         self.root.bind("<Left>", lambda event: self.move_image(-move_step, 0))
         self.root.bind("<Right>", lambda event: self.move_image(move_step, 0))
 
-        # 선택된 항목 하이라이트를 위한 변수 추가
-        self.selected_item_index = None
-
-        # 리스트박스에 선택 이벤트 바인딩 추가
-        self.label_listbox.bind('<<ListboxSelect>>', self.on_list_select)
-
-        # 확대/축소 관련 변수
+        # 확대/축소 관련 변수 및 이벤트 바인딩
         self.scale_factor = 1.0
-        self.zoom_step = 0.1  # 확대/축소 단계
-        
-        # 확대/축소 이벤트 바인딩
+        self.zoom_step = 0.1
         self.canvas.bind("<Control-MouseWheel>", self.zoom)
         self.canvas.bind("<Motion>", self.on_motion)
 
-         # Toggle Direction 버튼 추가
-        self.toggle_direction_button = tk.Button(self.right_frame, text="Toggle Direction", command=self.toggle_direction)
-        self.toggle_direction_button.pack(padx=10, pady=5)
-
-         # Bind Ctrl+S to save JSON file with image base name
+        # 단축키 바인딩: Ctrl+S로 JSON 파일 저장
         self.root.bind('<Control-s>', self.save_nodes_as_json)
+        self.root.bind('<Control-S>', self.save_nodes_as_json)
 
-        # Initialize image path variable
+        # 기타 초기화
         self.image_path = None
+        self.selected_item_index = None
+
+        # type_selector 초기화
+        self.setup_type_selector()
+
 
     def toggle_direction(self):
         selected_index = self.label_listbox.curselection()
@@ -225,32 +206,6 @@ class ImageEditor:
     def end_node_drag(self, event):
         self.dragging = False
 
-    def update_canvas(self):
-        self.canvas.delete("all")
-        self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self.tk_image)
-
-        # 노드 그리기
-        for i, node_info in enumerate(self.nodes):
-            outline_color = "yellow" if i == self.selected_item_index else "red"
-            width = 4 if i == self.selected_item_index else 3
-            self.canvas.create_rectangle(
-                node_info['coords'],
-                outline=outline_color,
-                width=width
-            )
-
-        # 관계 그리기
-        for i, connection in enumerate(self.connections):
-            from_node = self.nodes[connection['from']]
-            to_node = self.nodes[connection['to']]
-            self.canvas.create_line(
-                self.get_center(from_node['coords']),
-                self.get_center(to_node['coords']),
-                arrow=tk.LAST,
-                fill="black",
-                width=1
-            )
-
     def load_image(self):
         self.image_path = filedialog.askopenfilename()
         if self.image_path:
@@ -261,8 +216,19 @@ class ImageEditor:
             self.selected_item_index = None
 
             # 이미지 불러오기
-            self.original_image = Image.open(self.image_path).convert("RGBA")
+            self.original_image = Image.open(self.image_path)
+
+            # PNG의 알파 채널을 올바르게 처리하기 위한 설정
+            if self.original_image.mode == "RGBA":
+                # 투명한 부분을 흰색 배경으로 변경하여 알파 채널 문제 해결
+                background = Image.new("RGB", self.original_image.size, (255, 255, 255))
+                background.paste(self.original_image, mask=self.original_image.split()[3])  # 알파 채널 마스크
+                self.original_image = background  # 알파 채널이 제거된 이미지로 설정
+            else:
+                self.original_image = self.original_image.convert("RGB")
+
             self.update_image()
+
 
     def update_image(self):
         if self.original_image:
@@ -549,6 +515,12 @@ class ImageEditor:
         if item_text.startswith("Node:"):
             # 선택된 항목이 노드일 경우 텍스트 수정
             node_index = selected_index  # 노드 인덱스를 리스트 인덱스로 사용
+            
+            # node_index가 self.nodes의 범위를 벗어나지 않도록 체크
+            if node_index < 0 or node_index >= len(self.nodes):
+                messagebox.showerror("Error", "Invalid node index.")
+                return
+
             new_text = simpledialog.askstring("Edit", "새 텍스트를 입력하세요:", initialvalue=self.nodes[node_index]['text'])
             if new_text:
                 self.nodes[node_index]['text'] = new_text
@@ -558,22 +530,28 @@ class ImageEditor:
         elif item_text.startswith("Relation:"):
             # 선택된 항목이 관계일 경우 텍스트 수정
             connection_index = selected_index - len(self.nodes)  # 노드 개수를 빼서 관계 인덱스로 변환
-            if 0 <= connection_index < len(self.connections):
-                current_text = self.connections[connection_index]['text'] or ""
-                new_text = simpledialog.askstring("Edit", "새 텍스트를 입력하세요:", initialvalue=current_text)
-                if new_text:
-                    self.connections[connection_index]['text'] = new_text
-                    from_id = self.connections[connection_index]['from']
-                    to_id = self.connections[connection_index]['to']
-                    direction_icon = "→" if self.connections[connection_index]['direction'] else "←"
-                    connection_type = self.connections[connection_index]['type']
-                    
-                    # 업데이트된 텍스트로 리스트박스 항목 갱신
-                    display_text = f"Relation: {from_id} {direction_icon} {to_id} ({new_text}) [Type: {connection_type}]"
-                    self.label_listbox.delete(selected_index)
-                    self.label_listbox.insert(selected_index, display_text)
+            
+            # connection_index가 self.connections의 범위를 벗어나지 않도록 체크
+            if connection_index < 0 or connection_index >= len(self.connections):
+                messagebox.showerror("Error", "Invalid connection index.")
+                return
+
+            current_text = self.connections[connection_index]['text'] or ""
+            new_text = simpledialog.askstring("Edit", "새 텍스트를 입력하세요:", initialvalue=current_text)
+            if new_text:
+                self.connections[connection_index]['text'] = new_text
+                from_id = self.connections[connection_index]['from']
+                to_id = self.connections[connection_index]['to']
+                direction_icon = "→" if self.connections[connection_index]['direction'] else "←"
+                connection_type = self.connections[connection_index]['type']
+                
+                # 업데이트된 텍스트로 리스트박스 항목 갱신
+                display_text = f"Relation: {from_id} {direction_icon} {to_id} ({new_text}) [Type: {connection_type}]"
+                self.label_listbox.delete(selected_index)
+                self.label_listbox.insert(selected_index, display_text)
 
         self.update_canvas()
+
 
     def get_node_at(self, x, y):
         # 실제 클릭 좌표를 원본 이미지 좌표계로 변환
@@ -705,8 +683,8 @@ class ImageEditor:
             )
 
     def on_motion(self, event):
-        original_x = (event.x - self.img_x) / self.scale_factor
-        original_y = (event.y - self.img_y) / self.scale_factor
+        original_x = event.x
+        original_y = event.y
         
         # 변환된 좌표를 사용하여 마우스 위치에 있는 노드 찾기
         hovered_node_index = self.get_node_at(original_x, original_y)
