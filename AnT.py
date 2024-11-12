@@ -162,12 +162,69 @@ class ImageEditor:
         self.root.bind('<Control-s>', self.save_nodes_as_json)
         self.root.bind('<Control-S>', self.save_nodes_as_json)
 
+
+        # Define available colors and current selected color
+        self.colors = {
+            "Black": "#000000",
+            "Red": "#FF0000",
+            "Green": "#00FF00",
+            "Blue": "#0000FF",
+            "Yellow": "#FFFF00",
+            "Purple": "#800080",
+            "Cyan": "#00FFFF",
+            "Orange": "#FFA500"
+        }
+        self.selected_color = tk.StringVar(value="Black")  # Default color
+
+        # Color selection menu
+        self.color_label = tk.Label(self.right_frame, text="Select Connection Color:")
+        self.color_label.pack(pady=5)
+        self.color_menu = tk.OptionMenu(self.right_frame, self.selected_color, *self.colors.keys(), command=self.change_connection_color)
+        self.color_menu.pack()
+
+       
         # 기타 초기화
         self.image_path = None
         self.selected_item_index = None
 
         # type_selector 초기화
         self.setup_type_selector()
+
+
+    def change_connection_color(self, _=None):
+        selected_index = self.label_listbox.curselection()
+        if not selected_index:
+            return  # 색상을 변경할 항목이 선택되지 않은 경우
+
+        selected_index = selected_index[0]
+
+        # 선택된 항목이 연결인지 확인
+        if selected_index >= len(self.nodes):  # Nodes count as entries before connections in Listbox
+            connection_index = selected_index - len(self.nodes)
+            
+            # 현재 선택된 색상 가져오기
+            color_name = self.selected_color.get()
+            new_color = self.colors[color_name]
+            
+            # 연결의 색상 속성 업데이트
+            self.connections[connection_index]['color'] = new_color
+            
+            # Listbox에서 텍스트 업데이트
+            connection = self.connections[connection_index]
+            from_id = connection['from']
+            to_id = connection['to']
+            direction_icon = "→" if connection['direction'] else "←"
+            text = connection['text'] or ""
+            connection_type = connection['type']
+            display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}] [Color: {color_name}]"
+            
+            # Listbox 갱신
+            self.label_listbox.delete(selected_index)
+            self.label_listbox.insert(selected_index, display_text)
+            
+            # 변경 사항을 반영하기 위해 캔버스를 다시 그립니다.
+            self.update_canvas()
+
 
     def load_json(self):
         json_path = filedialog.askopenfilename(filetypes=[("JSON Files", "*.json")])
@@ -213,6 +270,8 @@ class ImageEditor:
                 direction_icon = "→" if connection['direction'] else "←"
                 text = connection['text'] or ""
                 connection_type = connection['type']
+                color = connection.get('color', "#000000")  # Default to black if color is missing
+                connection['color'] = color  # 기본값 적용
                 display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
                 self.label_listbox.insert(tk.END, display_text)
 
@@ -427,19 +486,13 @@ class ImageEditor:
 
     def update_canvas(self):
         self.canvas.delete("all")
-        
-        # 이미지 크기 조정
         if self.tk_image:
             img_width, img_height = int(self.image.width * self.scale_factor), int(self.image.height * self.scale_factor)
             resized_image = self.image.resize((img_width, img_height), Image.LANCZOS)
             self.tk_image = ImageTk.PhotoImage(resized_image)
-            
-            # 중앙에 이미지 그리기
             self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self.tk_image)
-        
-        # 확대/축소된 노드 그리기
+
         for i, node_info in enumerate(self.nodes):
-            # 원본 좌표에서 확대/축소 및 이미지 위치를 기준으로 좌표 변환
             x1, y1, x2, y2 = node_info['coords']
             scaled_coords = (
                 self.img_x + x1 * self.scale_factor,
@@ -447,12 +500,9 @@ class ImageEditor:
                 self.img_x + x2 * self.scale_factor,
                 self.img_y + y2 * self.scale_factor
             )
-            
             outline_color = "yellow" if i == self.selected_item_index else "red"
             width = 4 if i == self.selected_item_index else 3
             self.canvas.create_rectangle(scaled_coords, outline=outline_color, width=width)
-            
-            # 텍스트 위치도 변환된 좌표에 맞춰 중앙에 배치
             self.canvas.create_text(
                 (scaled_coords[0] + scaled_coords[2]) / 2,
                 (scaled_coords[1] + scaled_coords[3]) / 2,
@@ -460,20 +510,14 @@ class ImageEditor:
                 font=("Arial", 12)
             )
 
-        # 확대/축소된 연결 그리기
         for connection in self.connections:
             from_node = next((node for node in self.nodes if node['id'] == connection['from']), None)
             to_node = next((node for node in self.nodes if node['id'] == connection['to']), None)
-            
-            # 연결할 노드가 없으면 스킵
             if not from_node or not to_node:
                 continue
 
-            # from_node와 to_node의 중심 좌표 계산 및 확대/축소
             from_center = self.get_center(from_node['coords'])
             to_center = self.get_center(to_node['coords'])
-            
-            # 이미지 위치와 확대/축소 적용
             scaled_from_center = (
                 self.img_x + from_center[0] * self.scale_factor,
                 self.img_y + from_center[1] * self.scale_factor
@@ -482,21 +526,13 @@ class ImageEditor:
                 self.img_x + to_center[0] * self.scale_factor,
                 self.img_y + to_center[1] * self.scale_factor
             )
-            
-            # 연결선의 스타일 설정
-            if connection['type'] == "dashed":
-                line_dash = (6, 2)
-            elif connection['type'] == "dotted":
-                line_dash = (2, 1)
-            else:
-                line_dash = ()  # 실선
 
-            # 선택된 경우 스타일 강조
+            line_dash = (6, 2) if connection['type'] == "dashed" else (2, 1) if connection['type'] == "dotted" else ()
             is_selected = (self.connections.index(connection) + len(self.nodes)) == self.selected_item_index
-            line_color = "green" if is_selected else "black"
+            line_color = connection['color']
             width = 4 if is_selected else 2
 
-            # 화살표 그리기
+            # Draw connections with the selected color
             self.canvas.create_line(
                 scaled_from_center,
                 scaled_to_center,
@@ -506,7 +542,6 @@ class ImageEditor:
                 dash=line_dash if line_dash else None
             )
 
-            # 관계 텍스트가 있는 경우 텍스트도 함께 그리기
             if connection['text']:
                 mid_x = (scaled_from_center[0] + scaled_to_center[0]) / 2
                 mid_y = (scaled_from_center[1] + scaled_to_center[1]) / 2
@@ -576,7 +611,7 @@ class ImageEditor:
             nested_nodes = build_hierarchy(self.nodes)
 
             # JSON 데이터 저장
-            data = {"node": nested_nodes, "connections": self.connections}
+            data = {"node": nested_nodes, "connections": self.connections}  # color is automatically included in connections
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
 
@@ -737,6 +772,10 @@ class ImageEditor:
             from_node_id = self.nodes[self.selected_nodes[0]]['id']
             to_node_id = self.nodes[self.selected_nodes[1]]['id']
 
+            # Set color based on user selection
+            color_name = self.selected_color.get()
+            connection_color = self.colors[color_name]
+
             # 관계 정보 저장 (기본 type은 'line')
             connection_type = self.selected_type.get()  # 현재 선택된 타입
             connection_id = str(uuid.uuid4())[:3]  # 고유 id 추가
@@ -747,10 +786,11 @@ class ImageEditor:
                 'text': connection_text_json,  # JSON 저장 시 줄바꿈을 '\n'으로 처리된 텍스트 사용
                 'type': connection_type,  # 선택된 type 설정
                 'direction': True,  # 기본 값 True로 설정
+                'color': connection_color  # Add color attribute
             })
 
             # 리스트박스에 표시할 텍스트 설정 (화면에는 줄바꿈 그대로 표시)
-            display_text = f"Connection({connection_id}): {from_node_id} → {to_node_id} ({connection_text_display}) [Type: {connection_type}]"
+            display_text = f"Connection({connection_id}): {from_node_id} → {to_node_id} ({connection_text_display}) [Type: {connection_type}] [Color: {color_name}]"
             self.label_listbox.insert(tk.END, display_text)
 
         # 선택 해제 및 업데이트
