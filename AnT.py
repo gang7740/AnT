@@ -82,6 +82,9 @@ class ImageEditor:
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Configure>", self.on_resize)
 
+        self.resizing = False  # Flag to check if resizing is active
+
+
         # 메뉴 바 설정
         menubar = tk.Menu(root)
         root.config(menu=menubar)
@@ -185,10 +188,57 @@ class ImageEditor:
        
         # 기타 초기화
         self.image_path = None
-        self.selected_item_index = None
+        
+        # 선택된 항목의 인덱스를 분리하여 초기화
+        self.selected_node_index = None
+        self.selected_connection_index = None
 
         # type_selector 초기화
         self.setup_type_selector()
+
+    def update_label_listbox(self):
+        """Listbox 업데이트 메서드, 노드와 연결을 각각 추가."""
+        self.label_listbox.delete(0, tk.END)
+
+        # 노드를 리스트 박스에 추가
+        for node in self.nodes:
+            self.label_listbox.insert(tk.END, f"Node({node['id']}): {node['text']}")
+
+        # 연결을 리스트 박스에 추가
+        for connection in self.connections:
+            from_id = connection['from']
+            to_id = connection['to']
+            direction_icon = "→" if connection['direction'] else "←"
+            text = connection['text'] or ""
+            connection_type = connection['type']
+            display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
+            self.label_listbox.insert(tk.END, display_text)
+
+    def on_list_select(self, event):
+        """Listbox에서 선택 시 노드와 연결을 구분해 처리."""
+        selection = self.label_listbox.curselection()
+
+        # 선택된 항목이 있는지 확인
+        if selection:
+            selected_index = selection[0]
+
+            # 선택된 항목이 노드인지 연결인지 확인
+            if selected_index < len(self.nodes):
+                # 노드가 선택됨
+                self.selected_node_index = selected_index
+                self.selected_connection_index = None
+            else:
+                # 연결이 선택됨
+                self.selected_node_index = None
+                self.selected_connection_index = selected_index - len(self.nodes)
+
+        else:
+            # 아무 항목도 선택되지 않음
+            self.selected_node_index = None
+            self.selected_connection_index = None
+
+        # 선택된 항목에 따라 캔버스 업데이트
+        self.update_canvas()
 
 
     def change_connection_color(self, _=None):
@@ -230,7 +280,6 @@ class ImageEditor:
         json_path = filedialog.askopenfilename(filetypes=[("JSON Files", "*.json")])
         if not json_path:
             return  # 파일 선택 취소 시 종료
-
         try:
             # JSON 파일에서 데이터 로드
             with open(json_path, 'r', encoding='utf-8') as file:
@@ -242,21 +291,44 @@ class ImageEditor:
             self.label_listbox.delete(0, tk.END)
             self.selected_item_index = None  # 선택 초기화
 
-            # 재귀적으로 모든 노드를 가져오는 함수
+            # 좌표 겹침 방지를 위한 함수들 정의
+            def is_overlapping(new_coords, existing_coords):
+                """Check if new_coords overlap with any in existing_coords list."""
+                x1, y1, x2, y2 = new_coords
+                for ex_x1, ex_y1, ex_x2, ex_y2 in existing_coords:
+                    if not (x2 < ex_x1 or x1 > ex_x2 or y2 < ex_y1 or y1 > ex_y2):
+                        return True
+                return False
+
+            def assign_non_overlapping_coords(existing_coords):
+                """Assign coordinates that do not overlap with existing_coords."""
+                x, y, width, height = 50, 50, 100, 50
+                while is_overlapping((x, y, x + width, y + height), existing_coords):
+                    x += 120
+                    if x + width > self.canvas.winfo_width():
+                        x = 50
+                        y += 70
+                return (x, y, x + width, y + height)
+
+            existing_coords = []  # Track existing node coordinates for overlap checking
+
+            # 노드 불러오기 및 리스트 초기화
             def parse_nodes(node_list, parent_id=None):
                 for node in node_list:
+                    if "coords" not in node or not node["coords"]:
+                        node["coords"] = assign_non_overlapping_coords(existing_coords)
+                    existing_coords.append(node["coords"])
+
                     node_data = {
                         "id": node["id"],
                         "coords": node["coords"],
                         "text": node["text"],
-                        "parent_id": parent_id  # 상위 노드 ID 저장
+                        "parent_id": parent_id
                     }
                     self.nodes.append(node_data)
                     
-                    # Listbox에 노드를 추가 (들여쓰기 없이)
+                    # Listbox에 노드 추가
                     self.label_listbox.insert(tk.END, f"Node({node['id']}): {node['text']}")
-
-                    # 재귀 호출로 하위 노드 탐색
                     parse_nodes(node["node"], node["id"])
 
             # 최상위 노드 목록을 재귀적으로 파싱
@@ -275,7 +347,7 @@ class ImageEditor:
                 display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
                 self.label_listbox.insert(tk.END, display_text)
 
-            # 이미지 파일 이름 추출 및 여러 확장자 탐색
+            # 이미지 파일을 찾아 로드
             base_name = os.path.splitext(os.path.basename(json_path))[0]
             directory = os.path.dirname(json_path)
             possible_extensions = [".png", ".jpg", ".jpeg", ".bmp", ".gif"]
@@ -288,25 +360,21 @@ class ImageEditor:
             else:
                 image_path = None
 
-            # 이미지 파일을 찾았을 경우 로드
             if image_path:
                 self.image_path = image_path
                 self.original_image = Image.open(self.image_path)
-                self.update_image()
+                self.update_image()  # Canvas 크기와 이미지를 동기화
             else:
                 messagebox.showwarning("Image Missing", "The corresponding image file could not be found with common extensions (.png, .jpg, .jpeg, .bmp, .gif).")
 
-            # Listbox와 캔버스 업데이트
+            # Listbox와 Canvas 업데이트
+            self.update_label_listbox()
             self.update_canvas()
+
             messagebox.showinfo("Load Complete", "JSON file loaded successfully and is ready for editing.")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load JSON file: {e}")
-
-
-
-
-
 
 
     def prompt_multiline_text(self, title="Input", initial_text=""):
@@ -485,6 +553,7 @@ class ImageEditor:
 
 
     def update_canvas(self):
+        """캔버스에 이미지, 노드, 연결을 갱신하여 표시."""
         self.canvas.delete("all")
         if self.tk_image:
             img_width, img_height = int(self.image.width * self.scale_factor), int(self.image.height * self.scale_factor)
@@ -492,6 +561,7 @@ class ImageEditor:
             self.tk_image = ImageTk.PhotoImage(resized_image)
             self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self.tk_image)
 
+        # 노드 그리기
         for i, node_info in enumerate(self.nodes):
             x1, y1, x2, y2 = node_info['coords']
             scaled_coords = (
@@ -500,8 +570,8 @@ class ImageEditor:
                 self.img_x + x2 * self.scale_factor,
                 self.img_y + y2 * self.scale_factor
             )
-            outline_color = "yellow" if i == self.selected_item_index else "red"
-            width = 4 if i == self.selected_item_index else 3
+            outline_color = "yellow" if i == self.selected_node_index else "red"
+            width = 4 if i == self.selected_node_index else 3
             self.canvas.create_rectangle(scaled_coords, outline=outline_color, width=width)
             self.canvas.create_text(
                 (scaled_coords[0] + scaled_coords[2]) / 2,
@@ -510,7 +580,8 @@ class ImageEditor:
                 font=("Arial", 12)
             )
 
-        for connection in self.connections:
+        # 연결 그리기
+        for i, connection in enumerate(self.connections):
             from_node = next((node for node in self.nodes if node['id'] == connection['from']), None)
             to_node = next((node for node in self.nodes if node['id'] == connection['to']), None)
             if not from_node or not to_node:
@@ -528,7 +599,7 @@ class ImageEditor:
             )
 
             line_dash = (6, 2) if connection['type'] == "dashed" else (2, 1) if connection['type'] == "dotted" else ()
-            is_selected = (self.connections.index(connection) + len(self.nodes)) == self.selected_item_index
+            is_selected = i == self.selected_connection_index
             line_color = connection['color']
             width = 4 if is_selected else 2
 
@@ -546,38 +617,6 @@ class ImageEditor:
                 mid_x = (scaled_from_center[0] + scaled_to_center[0]) / 2
                 mid_y = (scaled_from_center[1] + scaled_to_center[1]) / 2
                 self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue", font=("Arial", 12))
-
-
-
-
-
-            
-    def on_list_select(self, event):
-        selection = self.label_listbox.curselection()
-        
-        if selection:
-            selected_index = selection[0]
-            
-            # 선택된 항목이 노드인지 연결인지 확인
-            item_text = self.label_listbox.get(selected_index)
-            
-            if item_text.startswith("Node("):
-                # 노드 인덱스 설정
-                self.selected_item_index = selected_index
-            elif item_text.startswith("Connection("):
-                # 연결 인덱스 설정
-                connection_index = selected_index - len(self.nodes)
-                if 0 <= connection_index < len(self.connections):
-                    self.selected_item_index = connection_index + len(self.nodes)
-                else:
-                    self.selected_item_index = None
-        else:
-            self.selected_item_index = None
-
-        self.update_canvas()  # 선택 상태를 캔버스에 업데이트
-
-
-
 
     def get_center(self, coords):
         x1, y1, x2, y2 = coords
@@ -630,25 +669,32 @@ class ImageEditor:
         selected_index = selected_index[0]
         item_text = self.label_listbox.get(selected_index)
 
+        # 선택한 항목이 노드인지 연결인지 확인
         if item_text.startswith("Node("):
             # 노드를 삭제
             node_index = selected_index
-            node_id = self.nodes[node_index]["id"]
-            
-            # 관련된 모든 연결 삭제
-            self.connections = [conn for conn in self.connections if conn['from'] != node_id and conn['to'] != node_id]
-            self.nodes.pop(node_index)
-            self.label_listbox.delete(0, tk.END)
-            self.update_label_listbox()
-
+            if node_index < len(self.nodes):  # 인덱스가 범위 내에 있는지 확인
+                node_id = self.nodes[node_index]["id"]
+                
+                # 관련된 모든 연결 삭제
+                self.connections = [conn for conn in self.connections if conn['from'] != node_id and conn['to'] != node_id]
+                self.nodes.pop(node_index)
+                self.label_listbox.delete(0, tk.END)
+                self.update_label_listbox()
+            else:
+                messagebox.showerror("Error", "선택한 노드를 삭제할 수 없습니다.")
         elif item_text.startswith("Connection("):
             # 연결을 삭제
             connection_index = selected_index - len(self.nodes)
-            self.connections.pop(connection_index)
-            self.label_listbox.delete(0, tk.END)
-            self.update_label_listbox()
+            if 0 <= connection_index < len(self.connections):  # 인덱스가 범위 내에 있는지 확인
+                self.connections.pop(connection_index)
+                self.label_listbox.delete(0, tk.END)
+                self.update_label_listbox()
+            else:
+                messagebox.showerror("Error", "선택한 연결을 삭제할 수 없습니다.")
 
         self.update_canvas()
+
 
 
     def edit_selected(self):
@@ -807,29 +853,45 @@ class ImageEditor:
         current_mode = self.mode_var.get()
         
         if current_mode == "connect":
-            # 연결 모드일 때만 클릭한 노드를 가져옴
             clicked_node = self.get_node_at(event.x, event.y)
             if clicked_node is not None:
                 if len(self.selected_nodes) < 2:
                     self.selected_nodes.append(clicked_node)
                     if len(self.selected_nodes) == 1:
                         self.highlight_node(clicked_node)
-
                 if len(self.selected_nodes) == 2:
                     self.create_connection()
         elif current_mode == "draw":
-            # Draw Node 모드일 때 드래그 시작
-            self.dragging = True
+            clicked_node = self.get_node_at(event.x, event.y)
+            
+            # 기존 노드 위에서 클릭한 경우 - 노드 크기 조절
+            if clicked_node is not None:
+                node = self.nodes[clicked_node]
+                x1, y1, x2, y2 = node['coords']
+                if abs(event.x - x2 * self.scale_factor - self.img_x) < 10 and abs(event.y - y2 * self.scale_factor - self.img_y) < 10:
+                    self.resizing = True
+                    self.selected_item_index = clicked_node
+                else:
+                    self.dragging = True  # 드래그 상태 활성화
+            
+            # 새로운 위치에서 클릭한 경우 - 새 노드 그리기
+            else:
+                self.dragging = True  # 새 노드 그리기 모드 활성화
+
 
     def on_drag(self, event):
-        # draw 모드일 때만 임시 사각형을 그려줌
-        if self.mode_var.get() == "draw" and self.dragging:
+        if self.resizing and self.selected_item_index is not None:
+            # 노드 크기 조절
+            node = self.nodes[self.selected_item_index]
+            x1, y1, _, _ = node['coords']
+            node['coords'] = (x1, y1, (event.x - self.img_x) / self.scale_factor, (event.y - self.img_y) / self.scale_factor)
+            self.update_canvas()
+        elif self.mode_var.get() == "draw" and self.dragging:
+            # 임시 사각형으로 노드 그리기 미리보기
             self.canvas.delete("temp_shape")
             self.canvas.create_rectangle(
-                self.start_x, self.start_y,
-                event.x, event.y,
-                outline="red",
-                tags="temp_shape"
+                self.start_x, self.start_y, event.x, event.y,
+                outline="red", tags="temp_shape"
             )
 
     def on_motion(self, event):
@@ -847,18 +909,19 @@ class ImageEditor:
 
      # Update where text input is required
     def on_release(self, event):
-        # Draw Node mode with multi-line text input
-        if self.mode_var.get() == "draw" and self.dragging:
+        if self.resizing:
+            self.resizing = False
+        elif self.mode_var.get() == "draw" and self.dragging:
             if abs(event.x - self.start_x) > 5 and abs(event.y - self.start_y) > 5:
                 self.canvas.delete("temp_shape")
 
-                # Convert drag coordinates to image coordinates
+                # 새로운 노드 좌표 계산
                 original_x1 = (self.start_x - self.img_x) / self.scale_factor
                 original_y1 = (self.start_y - self.img_y) / self.scale_factor
                 original_x2 = (event.x - self.img_x) / self.scale_factor
                 original_y2 = (event.y - self.img_y) / self.scale_factor
 
-                # Use the custom dialog for multi-line text input
+                # 텍스트 입력 대화상자 열기
                 text = self.prompt_multiline_text("Enter Text for Node")
                 if text:
                     node_id = str(uuid.uuid4())[:3]
@@ -868,15 +931,13 @@ class ImageEditor:
                         "text": text,
                         "parent_id": None
                     }
-                    # Assign parent_id if enclosing other nodes
-                    for other_node in self.nodes:
-                        x1, y1, x2, y2 = node_info["coords"]
-                        nx1, ny1, nx2, ny2 = other_node["coords"]
-                        if x1 <= nx1 <= x2 and y1 <= ny1 <= y2 and x1 <= nx2 <= x2 and y1 <= ny2 <= y2:
-                            other_node["parent_id"] = node_id
-
-                    self.nodes.append(node_info)                
+                    self.nodes.append(node_info)
                     self.label_listbox.insert(tk.END, f"Node({node_id}): {text}")
+
+                    # Listbox와 노드 상태 일관성 유지
+                    self.label_listbox.selection_clear(0, tk.END)
+                    self.label_listbox.selection_set(tk.END)
+                    self.selected_item_index = len(self.nodes) - 1
 
                     self.update_canvas()
 
