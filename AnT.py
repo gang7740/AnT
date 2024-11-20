@@ -229,7 +229,7 @@ class ImageEditor:
         for connection in self.connections:
             from_id = connection['from']
             to_id = connection['to']
-            direction_icon = "→" if connection['direction'] else "←"
+            direction_icon = "→" if connection['direction'] else "-"
             text = connection['text'] or ""
             connection_type = connection['type']
             display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
@@ -281,7 +281,7 @@ class ImageEditor:
             connection = self.connections[connection_index]
             from_id = connection['from']
             to_id = connection['to']
-            direction_icon = "→" if connection['direction'] else "←"
+            direction_icon = "→" if connection['direction'] else "-"
             text = connection['text'] or ""
             connection_type = connection['type']
             display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}] [Color: {color_name}]"
@@ -369,7 +369,7 @@ class ImageEditor:
                     existing_ids.add(connection['id'])
                 from_id = connection['from']
                 to_id = connection['to']
-                direction_icon = "→" if connection['direction'] else "←"
+                direction_icon = "→" if connection['direction'] else "-"
                 text = connection['text'] or ""
                 connection_type = connection['type']
                 color = connection.get('color', "#000000")  # Default to black if color is missing
@@ -580,7 +580,7 @@ class ImageEditor:
         for connection in self.connections:
             from_id = connection['from']
             to_id = connection['to']
-            direction_icon = "→" if connection['direction'] else "←"
+            direction_icon = "→" if connection['direction'] else "-"
             text = connection['text'] or ""
             connection_type = connection['type']
             display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
@@ -640,11 +640,14 @@ class ImageEditor:
             width = 4 if is_selected else 2
             line_color = "yellow" if is_selected else line_color
 
+             # 화살표 여부 결정
+            arrow_option = tk.LAST if connection.get('direction', True) else None
+
             # Draw connections with the selected color
             self.canvas.create_line(
                 scaled_from_center,
                 scaled_to_center,
-                arrow=tk.LAST,
+                arrow=arrow_option,
                 fill=line_color,
                 width=width,
                 dash=line_dash if line_dash else None
@@ -770,7 +773,7 @@ class ImageEditor:
                 self.connections[connection_index]['text'] = new_text
                 from_id = self.connections[connection_index]['from']
                 to_id = self.connections[connection_index]['to']
-                direction_icon = "→" if self.connections[connection_index]['direction'] else "←"
+                direction_icon = "→" if self.connections[connection_index]['direction'] else "-"
                 connection_type = self.connections[connection_index]['type']
                 display_text = f"Connection({self.connections[connection_index]['id']}): {from_id} {direction_icon} {to_id} ({new_text}) [Type: {connection_type}]"
                 self.label_listbox.delete(selected_index)
@@ -1010,7 +1013,6 @@ class ImageEditor:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    
     # 전체화면 모드 설정
     root.attributes("-fullscreen", True)
 
