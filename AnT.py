@@ -154,12 +154,16 @@ class ImageEditor:
         self.canvas.bind("<B3-Motion>", self.on_node_drag)
         self.canvas.bind("<ButtonRelease-3>", self.end_node_drag)
 
-        # 키보드 화살표로 이미지 이동 설정
-        move_step = 20
-        self.root.bind("<Up>", lambda event: self.move_image(0, -move_step))
-        self.root.bind("<Down>", lambda event: self.move_image(0, move_step))
-        self.root.bind("<Left>", lambda event: self.move_image(-move_step, 0))
-        self.root.bind("<Right>", lambda event: self.move_image(move_step, 0))
+        # 마우스 오른쪽 버튼으로 이미지 및 객체 이동 관련 이벤트 추가
+        self.canvas.bind("<Button-3>", self.start_canvas_drag)
+        self.canvas.bind("<B3-Motion>", self.on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-3>", self.end_canvas_drag)
+
+        # 드래그 상태 변수 추가
+        self.dragging_canvas = False
+        self.drag_start_x = 0
+        self.drag_start_y = 0
+
 
         # 확대/축소 관련 변수 및 이벤트 바인딩
         self.scale_factor = 1.0
@@ -208,6 +212,61 @@ class ImageEditor:
 
         # type_selector 초기화
         self.setup_type_selector()
+
+      
+
+    def start_canvas_drag(self, event):
+        """마우스 오른쪽 버튼 클릭 시 드래그 시작."""
+        # 클릭 위치가 노드 위인지 확인
+        clicked_node = self.get_node_at(event.x, event.y)
+
+        if clicked_node is not None:
+            # 노드가 클릭된 경우: 노드 이동으로 처리
+            self.selected_item_index = clicked_node
+            self.dragging = True
+            self.drag_data = {"x": event.x, "y": event.y}
+        else:
+            # 노드가 아닌 경우: 캔버스 이동으로 처리
+            self.dragging_canvas = True
+            self.drag_start_x = event.x
+            self.drag_start_y = event.y
+
+    def on_canvas_drag(self, event):
+        """마우스 오른쪽 버튼 드래그 중."""
+        if self.dragging:
+            # 노드 이동 처리
+            if self.selected_item_index is not None:
+                dx = event.x - self.drag_data["x"]
+                dy = event.y - self.drag_data["y"]
+                node = self.nodes[self.selected_item_index]
+                x1, y1, x2, y2 = node['coords']
+                new_coords = (x1 + dx, y1 + dy, x2 + dx, y2 + dy)
+                node['coords'] = new_coords
+                self.drag_data["x"] = event.x
+                self.drag_data["y"] = event.y
+                self.update_canvas()
+        elif self.dragging_canvas:
+            # 캔버스 이동 처리
+            dx = event.x - self.drag_start_x
+            dy = event.y - self.drag_start_y
+
+            # 이미지 및 객체 이동
+            self.img_x += dx
+            self.img_y += dy
+
+            # 기존 드래그 시작 지점 업데이트
+            self.drag_start_x = event.x
+            self.drag_start_y = event.y
+
+            # 캔버스 업데이트
+            self.update_canvas()
+
+    def end_canvas_drag(self, event):
+        """마우스 오른쪽 버튼 드래그 종료."""
+        self.dragging = False
+        self.dragging_canvas = False
+
+
     def assign_parent_child_relationship(self):
         """노드 간 부모-자식 관계를 설정"""
         for child in self.nodes:
