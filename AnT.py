@@ -84,6 +84,10 @@ class ImageEditor:
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Configure>", self.on_resize)
 
+         # 캔버스 크기 변수 초기화
+        self.canvas_width = 0  # 초기 캔버스 너비
+        self.canvas_height = 0  # 초기 캔버스 높이
+
         self.resizing = False  # Flag to check if resizing is active
 
 
@@ -166,6 +170,12 @@ class ImageEditor:
         # 단축키 바인딩: Ctrl+S로 JSON 파일 저장
         self.root.bind('<Control-s>', self.save_nodes_as_json)
         self.root.bind('<Control-S>', self.save_nodes_as_json)
+
+         # 캐싱 변수 초기화
+        self._cached_transparent_image = None  # 투명도 적용된 이미지
+        self._cached_resized_image = None      # 리사이즈된 이미지
+        self._cached_resized_image_size = None # 리사이즈된 이미지 크기
+        self._cached_tk_image = None           # Tkinter에 표시할 이미지
 
 
         # Define available colors and current selected color
@@ -348,7 +358,10 @@ class ImageEditor:
 
                     # Listbox에 노드 추가
                     self.label_listbox.insert(tk.END, f"Node({node['id']}): {node['text']}")
-                    parse_nodes(node["node"], node["id"])
+
+                    # "node" 키가 있는 경우만 재귀 호출
+                    if "node" in node and isinstance(node["node"], list):
+                        parse_nodes(node["node"], node["id"])
 
             # 최상위 "components" 키의 데이터를 재귀적으로 파싱
             parse_nodes(data.get("components", []))  # "components"로 변경
@@ -441,16 +454,28 @@ class ImageEditor:
             
             self.update_canvas()
 
-
-
+    
     def zoom(self, event):
-        # 확대/축소 비율 계산
-        if event.delta > 0:  # 마우스 휠 업 -> 확대
-            self.scale_factor += self.zoom_step
-        elif event.delta < 0:  # 마우스 휠 다운 -> 축소
-            self.scale_factor = max(0.1, self.scale_factor - self.zoom_step)  # 축소 한계 설정
-        
+        if event.delta > 0:  # 확대
+            self.scale_factor = min(5.0, self.scale_factor + self.zoom_step)  # 최대 5배
+        elif event.delta < 0:  # 축소
+            self.scale_factor = max(0.1, self.scale_factor - self.zoom_step)  # 최소 0.1배
         self.update_canvas()
+
+    def delayed_update_canvas(self):
+        if hasattr(self, "_update_pending") and self._update_pending:
+            return
+        self._update_pending = True
+
+        def update():
+            self.update_canvas()
+            self._update_pending = False
+
+        self.root.after(50, update)  # 50ms 지연
+
+
+
+        
 
     def move_image(self, dx, dy):
     # """Move the image by (dx, dy) without affecting other items on the canvas."""
@@ -465,13 +490,25 @@ class ImageEditor:
 
     # 투명도 조절 메소드
     def adjust_opacity(self, event=None):
+        """Adjust the transparency of the image."""
         if self.original_image:
             alpha = self.opacity_slider.get()
-            self.image = self.original_image.copy().convert("RGBA")
-            alpha_image = Image.new("L", self.image.size, alpha)
-            self.image.putalpha(alpha_image)
-            self.tk_image = ImageTk.PhotoImage(self.image)
+            if self.original_image.mode != "RGBA":
+                # RGBA로 변환 필요 시 변환
+                self.original_image = self.original_image.convert("RGBA")
+
+            # 투명도 처리
+            alpha_layer = Image.new("L", self.original_image.size, alpha)
+            transparent_image = self.original_image.copy()
+            transparent_image.putalpha(alpha_layer)
+
+            # 투명도 이미지 캐싱
+            self._cached_transparent_image = transparent_image
+            self._cached_resized_image = None  # 투명도가 변경되었으므로 리사이즈 캐시 무효화
             self.update_canvas()
+
+
+
 
     # 오른쪽 클릭으로 노드 이동 시작
     def on_right_click(self, event):
@@ -551,23 +588,14 @@ class ImageEditor:
 
             self.draw = ImageDraw.Draw(self.image)
             self.adjust_opacity()
+            
 
     def on_resize(self, event):
-        if self.original_image:
-            # 캔버스의 크기를 새로 가져옴
-            canvas_width = self.canvas.winfo_width()
-            canvas_height = self.canvas.winfo_height()
-    
-            # 이미지 및 도형의 스케일링 비율 계산
-            self.scale_x = canvas_width / self.canvas_width if self.canvas_width != 0 else 1
-            self.scale_y = canvas_height / self.canvas_height if self.canvas_height != 0 else 1
-    
-            # 이미지 업데이트 (리사이즈)
-            self.update_image()
-    
-            # 현재 캔버스 크기 저장
-            self.canvas_width = canvas_width
-            self.canvas_height = canvas_height
+        # 캔버스 크기가 변경된 경우에만 업데이트
+        if event.width != self.canvas_width or event.height != self.canvas_height:
+            self.canvas_width = event.width
+            self.canvas_height = event.height
+            self.update_canvas()
 
     def update_label_listbox(self):
         self.label_listbox.delete(0, tk.END)
@@ -588,16 +616,26 @@ class ImageEditor:
 
 
     def update_canvas(self):
-        """캔버스에 이미지, 노드, 연결을 갱신하여 표시."""
-        self.assign_parent_child_relationship()  # 관계 재설정 호출
+        """Update the canvas with the current image, nodes, and connections."""
+        self.assign_parent_child_relationship()
         self.canvas.delete("all")
-        if self.tk_image:
-            img_width, img_height = int(self.image.width * self.scale_factor), int(self.image.height * self.scale_factor)
-            resized_image = self.image.resize((img_width, img_height), Image.LANCZOS)
-            self.tk_image = ImageTk.PhotoImage(resized_image)
-            self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self.tk_image)
 
-        # 노드 그리기
+        # 이미지 그리기
+        if self._cached_transparent_image:
+            img_width = int(self._cached_transparent_image.width * self.scale_factor)
+            img_height = int(self._cached_transparent_image.height * self.scale_factor)
+
+            # 이미지 캐싱 및 리샘플링
+            if not hasattr(self, "_cached_resized_image") or self._cached_resized_image_size != (img_width, img_height):
+                resized_image = self._cached_transparent_image.resize((img_width, img_height), Image.LANCZOS)
+                self._cached_resized_image = resized_image
+                self._cached_resized_image_size = (img_width, img_height)
+                self._cached_tk_image = ImageTk.PhotoImage(resized_image)
+
+            # 캔버스에 이미지 그리기
+            self.canvas.create_image(self.img_x, self.img_y, anchor=tk.NW, image=self._cached_tk_image)
+
+        # 노드 및 연결 그리기
         for i, node_info in enumerate(self.nodes):
             x1, y1, x2, y2 = node_info['coords']
             scaled_coords = (
@@ -639,11 +677,8 @@ class ImageEditor:
             line_color = connection['color']
             width = 4 if is_selected else 2
             line_color = "yellow" if is_selected else line_color
-
-             # 화살표 여부 결정
             arrow_option = tk.LAST if connection.get('direction', True) else None
 
-            # Draw connections with the selected color
             self.canvas.create_line(
                 scaled_from_center,
                 scaled_to_center,
@@ -657,6 +692,8 @@ class ImageEditor:
                 mid_x = (scaled_from_center[0] + scaled_to_center[0]) / 2
                 mid_y = (scaled_from_center[1] + scaled_to_center[1]) / 2
                 self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue", font=("Arial", 12))
+
+
 
 
     def get_center(self, coords):
