@@ -60,37 +60,6 @@ class ImageEditor:
         self.root = root
         self.root.title("Image Drawing with Nodes")
 
-        # 레이아웃 설정
-        self.top_frame = tk.Frame(root)
-        self.top_frame.pack(side=tk.TOP, fill=tk.X)
-        self.left_frame = tk.Frame(root)
-        self.left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.right_frame = tk.Frame(root)
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # 투명도 슬라이더 설정
-        self.opacity_slider = tk.Scale(self.top_frame, from_=0, to=255, orient=tk.HORIZONTAL, label="Transparency")
-        self.opacity_slider.set(128)  # 기본 값 128
-        self.opacity_slider.pack(fill=tk.X)
-        self.opacity_slider.bind("<Motion>", self.adjust_opacity)
-
-        # 비율 유지 체크박스 설정
-        self.keep_aspect_ratio = tk.BooleanVar(value=True)
-        self.aspect_ratio_checkbox = tk.Checkbutton(self.top_frame, text="Keep Aspect Ratio", variable=self.keep_aspect_ratio)
-        self.aspect_ratio_checkbox.pack()
-
-        # 캔버스 설정
-        self.canvas = tk.Canvas(self.left_frame, bg="white")
-        self.canvas.pack(fill=tk.BOTH, expand=True)
-        self.canvas.bind("<Configure>", self.on_resize)
-
-         # 캔버스 크기 변수 초기화
-        self.canvas_width = 0  # 초기 캔버스 너비
-        self.canvas_height = 0  # 초기 캔버스 높이
-
-        self.resizing = False  # Flag to check if resizing is active
-
-
         # 메뉴 바 설정
         menubar = tk.Menu(root)
         root.config(menu=menubar)
@@ -99,34 +68,76 @@ class ImageEditor:
         file_menu.add_command(label="Open Image", command=self.load_image)
         file_menu.add_command(label="Save Image", command=self.save_image)
         file_menu.add_command(label="Save Nodes and Connections as JSON", command=self.save_nodes_as_json)
-        file_menu.add_command(label="Load JSON", command=self.load_json)  # New menu option
+        file_menu.add_command(label="Load JSON", command=self.load_json)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_closing)
 
+        # 상단 프레임 (메뉴 바 아래)
+        self.top_frame = tk.Frame(root)
+        self.top_frame.pack(side=tk.TOP, fill=tk.X)
 
-        # 모드 선택 버튼
-        self.mode_frame = tk.Frame(self.right_frame)
-        self.mode_frame.pack(padx=10, pady=5)
-        self.mode_var = tk.StringVar(value="draw")
-        self.draw_mode_btn = tk.Radiobutton(self.mode_frame, text="Draw Node", variable=self.mode_var, value="draw")
-        self.connect_mode_btn = tk.Radiobutton(self.mode_frame, text="Connect Nodes", variable=self.mode_var, value="connect")
-        self.draw_mode_btn.pack(side=tk.LEFT, padx=5)
-        self.connect_mode_btn.pack(side=tk.LEFT, padx=5)
+        # PanedWindow로 레이아웃 변경 (캔버스와 리스트박스 조정 가능)
+        self.main_paned = tk.PanedWindow(root, orient=tk.HORIZONTAL)
+        self.main_paned.pack(fill=tk.BOTH, expand=True)
 
-        # 노드 목록 박스 및 버튼 설정
+        # 왼쪽 프레임 (캔버스 포함)
+        self.left_frame = tk.Frame(self.main_paned)
+        self.canvas = tk.Canvas(self.left_frame, bg="white")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.main_paned.add(self.left_frame)
+
+        # 오른쪽 프레임 (리스트박스 및 옵션 포함)
+        self.right_frame = tk.Frame(self.main_paned, width=200)
+        self.main_paned.add(self.right_frame)
+
+        # 오른쪽 프레임 크기 조정 가능하도록 설정 (초기 비율 70% 왼쪽, 30% 오른쪽)
+        self.main_paned.paneconfigure(self.left_frame, minsize=1280)  # 왼쪽 프레임 70%
+        #self.main_paned.paneconfigure(self.right_frame, minsize=300)  # 오른쪽 프레임 30%
+
+        # 투명도 슬라이더
+        self.opacity_slider = tk.Scale(self.top_frame, from_=0, to=255, orient=tk.HORIZONTAL, label="Transparency")
+        self.opacity_slider.set(128)
+        self.opacity_slider.pack(fill=tk.X)
+        self.opacity_slider.bind("<Motion>", self.adjust_opacity)
+
+        # 비율 유지 체크박스
+        self.keep_aspect_ratio = tk.BooleanVar(value=True)
+        self.aspect_ratio_checkbox = tk.Checkbutton(self.top_frame, text="Keep Aspect Ratio", variable=self.keep_aspect_ratio)
+        self.aspect_ratio_checkbox.pack()
+
+        # 컬러 선택 변수 초기화
+        self.selected_color = tk.StringVar(value="Black")  # 기본 색상 설정
+        self.colors = {
+            "Black": "#000000",
+            "Red": "#FF0000",
+            "Green": "#00FF00",
+            "Blue": "#0000FF",
+            "Yellow": "#FFFF00",
+            "Purple": "#800080",
+            "Cyan": "#00FFFF",
+            "Orange": "#FFA500"
+        }
+
+        # 리스트박스와 버튼
         self.label_listbox = tk.Listbox(self.right_frame, width=40, height=20)
-        self.label_listbox.pack(padx=10, pady=10)
-        self.label_listbox.bind('<<ListboxSelect>>', self.on_list_select)
-        
+        self.label_listbox.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)  # fill=tk.BOTH로 좌우 크기 조정 가능
         self.delete_button = tk.Button(self.right_frame, text="Delete Selected", command=self.delete_selected)
         self.delete_button.pack(padx=10, pady=5)
-        
         self.edit_button = tk.Button(self.right_frame, text="Edit Selected", command=self.edit_selected)
         self.edit_button.pack(padx=10, pady=5)
-        
-        # Toggle Direction 버튼 추가
+
+        # Toggle Direction 버튼
         self.toggle_direction_button = tk.Button(self.right_frame, text="Toggle Direction", command=self.toggle_direction)
         self.toggle_direction_button.pack(padx=10, pady=5)
+
+        # 컬러 선택 메뉴
+        self.color_label = tk.Label(self.right_frame, text="Select Connection Color:")
+        self.color_label.pack(pady=5)
+        self.color_menu = tk.OptionMenu(self.right_frame, self.selected_color, *self.colors.keys(), command=self.change_connection_color)
+        self.color_menu.pack()
+
+        # 관계 타입 선택 메뉴
+        self.setup_type_selector()
 
         # 이미지 및 도형 관련 변수 초기화
         self.image = None
@@ -159,11 +170,12 @@ class ImageEditor:
         self.canvas.bind("<B3-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-3>", self.end_canvas_drag)
 
+        self.label_listbox.bind("<<ListboxSelect>>", self.on_list_select)
+
         # 드래그 상태 변수 추가
         self.dragging_canvas = False
         self.drag_start_x = 0
         self.drag_start_y = 0
-
 
         # 확대/축소 관련 변수 및 이벤트 바인딩
         self.scale_factor = 1.0
@@ -181,27 +193,6 @@ class ImageEditor:
         self._cached_resized_image_size = None # 리사이즈된 이미지 크기
         self._cached_tk_image = None           # Tkinter에 표시할 이미지
 
-
-        # Define available colors and current selected color
-        self.colors = {
-            "Black": "#000000",
-            "Red": "#FF0000",
-            "Green": "#00FF00",
-            "Blue": "#0000FF",
-            "Yellow": "#FFFF00",
-            "Purple": "#800080",
-            "Cyan": "#00FFFF",
-            "Orange": "#FFA500"
-        }
-        self.selected_color = tk.StringVar(value="Black")  # Default color
-
-        # Color selection menu
-        self.color_label = tk.Label(self.right_frame, text="Select Connection Color:")
-        self.color_label.pack(pady=5)
-        self.color_menu = tk.OptionMenu(self.right_frame, self.selected_color, *self.colors.keys(), command=self.change_connection_color)
-        self.color_menu.pack()
-
-       
         # 기타 초기화
         self.image_path = None
         
@@ -210,9 +201,16 @@ class ImageEditor:
         self.selected_connection_index = None
         self.selected_item_index = None  # 초기화 추가
 
-        # type_selector 초기화
-        self.setup_type_selector()
 
+    def initialize_canvas_events(self):
+        """Canvas 이벤트 초기화"""
+        self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<B1-Motion>", self.on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_release)
+        self.canvas.bind("<Button-3>", self.start_canvas_drag)
+        self.canvas.bind("<B3-Motion>", self.on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-3>", self.end_canvas_drag)
+        self.canvas.bind("<Configure>", self.on_resize)
       
 
     def start_canvas_drag(self, event):
@@ -285,7 +283,6 @@ class ImageEditor:
                     child['parent_id'] = parent['id']
                     break  # 첫 번째 부모를 찾으면 종료
 
-
     def update_label_listbox(self):
         """Listbox 업데이트 메서드, 노드와 연결을 각각 추가."""
         self.label_listbox.delete(0, tk.END)
@@ -303,6 +300,15 @@ class ImageEditor:
             connection_type = connection['type']
             display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
             self.label_listbox.insert(tk.END, display_text)
+
+        # 하이라이트 처리 (선택된 항목을 노란색으로 하이라이트)
+        selected_index = self.label_listbox.curselection()
+        if selected_index:
+            self.label_listbox.itemconfig(selected_index[0], {'bg': 'yellow'})
+        
+        # 리스트박스를 다시 업데이트하여 하이라이트 효과 반영
+        self.label_listbox.update_idletasks()
+            
 
     def on_list_select(self, event):
         selection = self.label_listbox.curselection()
@@ -422,7 +428,7 @@ class ImageEditor:
                     if "node" in node and isinstance(node["node"], list):
                         parse_nodes(node["node"], node["id"])
 
-            # 최상위 "components" 키의 데이터를 재귀적으로 파싱
+            # 최상위 "components" 키의 데이터   를 재귀적으로 파싱
             parse_nodes(data.get("components", []))  # "components"로 변경
 
             # connections를 불러와 Listbox에 추가
@@ -547,25 +553,36 @@ class ImageEditor:
         if messagebox.askokcancel("Quit", "정말 종료하시겠습니까?"):
             self.root.destroy()
 
-    # 투명도 조절 메소드
     def adjust_opacity(self, event=None):
-        """Adjust the transparency of the image."""
-        if self.original_image:
-            alpha = self.opacity_slider.get()
-            if self.original_image.mode != "RGBA":
-                # RGBA로 변환 필요 시 변환
-                self.original_image = self.original_image.convert("RGBA")
+        """Adjust the transparency of the image in real-time."""
+        if not self.original_image:
+            return
 
-            # 투명도 처리
-            alpha_layer = Image.new("L", self.original_image.size, alpha)
-            transparent_image = self.original_image.copy()
-            transparent_image.putalpha(alpha_layer)
+        # 슬라이더 값에 따른 투명도 조정
+        alpha = self.opacity_slider.get()
 
-            # 투명도 이미지 캐싱
-            self._cached_transparent_image = transparent_image
-            self._cached_resized_image = None  # 투명도가 변경되었으므로 리사이즈 캐시 무효화
-            self.update_canvas()
+        # 투명도 이미지 생성
+        alpha_channel = Image.new("L", self.original_image.size, alpha)
+        transparent_image = self.original_image.copy()
+        transparent_image.putalpha(alpha_channel)
 
+        # 캐시 업데이트
+        self._cached_transparent_image = transparent_image
+
+        # Tkinter용 이미지 갱신
+        img_width = int(transparent_image.width * self.scale_factor)
+        img_height = int(transparent_image.height * self.scale_factor)
+
+        resized_image = transparent_image.resize((img_width, img_height), Image.LANCZOS)
+        self._cached_resized_image = resized_image
+        self._cached_resized_image_size = (img_width, img_height)
+        self._cached_tk_image = ImageTk.PhotoImage(resized_image)
+
+        # 캔버스 업데이트
+        self.update_canvas()
+
+        # 강제 업데이트
+        self.canvas.update_idletasks()
 
 
 
@@ -655,24 +672,6 @@ class ImageEditor:
             self.canvas_width = event.width
             self.canvas_height = event.height
             self.update_canvas()
-
-    def update_label_listbox(self):
-        self.label_listbox.delete(0, tk.END)
-
-        # 노드를 리스트 박스에 추가
-        for node in self.nodes:
-            self.label_listbox.insert(tk.END, f"Node({node['id']}): {node['text']}")
-
-        # 연결을 리스트 박스에 추가
-        for connection in self.connections:
-            from_id = connection['from']
-            to_id = connection['to']
-            direction_icon = "→" if connection['direction'] else "-"
-            text = connection['text'] or ""
-            connection_type = connection['type']
-            display_text = f"Connection({connection['id']}): {from_id} {direction_icon} {to_id} ({text}) [Type: {connection_type}]"
-            self.label_listbox.insert(tk.END, display_text)
-
 
     def update_canvas(self):
         """Update the canvas with the current image, nodes, and connections."""
@@ -916,11 +915,12 @@ class ImageEditor:
     def setup_type_selector(self):
         # 관계 타입 선택 메뉴
         self.type_label = tk.Label(self.right_frame, text="Change Connection Type:")
-        self.type_label.pack(pady=(20, 5))
+        self.type_label.pack(pady=(40, 5))
         self.type_options = ["line", "dashed", "dotted", "unknown"]
         self.selected_type = tk.StringVar(value="line")  # 기본값 설정
         self.type_menu = tk.OptionMenu(self.right_frame, self.selected_type, *self.type_options, command=self.update_type)
         self.type_menu.pack()
+
 
     def update_type(self, _=None):  # 선택한 옵션을 반영하도록 기본값 매개변수 사용
         selected_index = self.label_listbox.curselection()
