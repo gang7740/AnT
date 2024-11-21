@@ -33,6 +33,7 @@ class MultiLineInputDialog:
         self.text.bind("<Return>", self.on_return)
 
         self.result = None
+        
 
     def insert_newline(self, event):
         # Insert a single newline and prevent other actions
@@ -80,6 +81,8 @@ class ImageEditor:
         self.main_paned = tk.PanedWindow(root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True)
 
+       
+
         # 왼쪽 프레임 (캔버스 포함)
         self.left_frame = tk.Frame(self.main_paned)
         self.canvas = tk.Canvas(self.left_frame, bg="white")
@@ -93,6 +96,15 @@ class ImageEditor:
         # 오른쪽 프레임 크기 조정 가능하도록 설정 (초기 비율 70% 왼쪽, 30% 오른쪽)
         self.main_paned.paneconfigure(self.left_frame, minsize=1280)  # 왼쪽 프레임 70%
         #self.main_paned.paneconfigure(self.right_frame, minsize=300)  # 오른쪽 프레임 30%
+
+
+        self.mode_frame = tk.Frame(self.right_frame)
+        self.mode_frame.pack(padx=10, pady=5)
+        self.mode_var = tk.StringVar(value="draw")
+        self.draw_mode_btn = tk.Radiobutton(self.mode_frame, text="Draw Node", variable=self.mode_var, value="draw")
+        self.connect_mode_btn = tk.Radiobutton(self.mode_frame, text="Connect Nodes", variable=self.mode_var, value="connect")
+        self.draw_mode_btn.pack(side=tk.LEFT, padx=5)
+        self.connect_mode_btn.pack(side=tk.LEFT, padx=5)
 
         # 투명도 슬라이더
         self.opacity_slider = tk.Scale(self.top_frame, from_=0, to=255, orient=tk.HORIZONTAL, label="Transparency")
@@ -156,6 +168,7 @@ class ImageEditor:
         self.img_x = 0
         self.img_y = 0
         self.drag_data = {"x": 0, "y": 0}
+        self.resizing = False  # 노드 크기 조정 상태를 추적
 
         # 이벤트 바인딩
         self.canvas.bind("<Button-1>", self.on_click)
@@ -169,6 +182,7 @@ class ImageEditor:
         self.canvas.bind("<Button-3>", self.start_canvas_drag)
         self.canvas.bind("<B3-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-3>", self.end_canvas_drag)
+        self.canvas.bind("<Double-1>", self.on_canvas_left_click)
 
         self.label_listbox.bind("<<ListboxSelect>>", self.on_list_select)
 
@@ -202,15 +216,16 @@ class ImageEditor:
         self.selected_item_index = None  # 초기화 추가
 
 
-    def initialize_canvas_events(self):
-        """Canvas 이벤트 초기화"""
-        self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<B1-Motion>", self.on_drag)
-        self.canvas.bind("<ButtonRelease-1>", self.on_release)
-        self.canvas.bind("<Button-3>", self.start_canvas_drag)
-        self.canvas.bind("<B3-Motion>", self.on_canvas_drag)
-        self.canvas.bind("<ButtonRelease-3>", self.end_canvas_drag)
-        self.canvas.bind("<Configure>", self.on_resize)
+
+    # def initialize_canvas_events(self):
+    #     """Canvas 이벤트 초기화"""
+    #     self.canvas.bind("<Button-1>", self.on_click)
+    #     self.canvas.bind("<B1-Motion>", self.on_drag)
+    #     self.canvas.bind("<ButtonRelease-1>", self.on_release)
+    #     self.canvas.bind("<Button-3>", self.start_canvas_drag)
+    #     self.canvas.bind("<B3-Motion>", self.on_canvas_drag)
+    #     self.canvas.bind("<ButtonRelease-3>", self.end_canvas_drag)
+    #     self.canvas.bind("<Configure>", self.on_resize)
       
 
     def start_canvas_drag(self, event):
@@ -584,6 +599,65 @@ class ImageEditor:
         # 강제 업데이트
         self.canvas.update_idletasks()
 
+    def is_point_near_line(self, point, line_start, line_end, tolerance=5):
+        """점이 선에 가까운지 확인."""
+        px, py = point
+        x1, y1 = line_start
+        x2, y2 = line_end
+
+        # 선과 점 사이의 거리 계산
+        line_mag = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+        if line_mag < 1e-6:
+            return False  # 선이 너무 짧음
+
+        u = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / (line_mag ** 2)
+        u = max(min(u, 1), 0)  # u 값 제한
+
+        closest_x = x1 + u * (x2 - x1)
+        closest_y = y1 + u * (y2 - y1)
+
+        dist = ((px - closest_x) ** 2 + (py - closest_y) ** 2) ** 0.5
+        return dist <= tolerance
+
+    def select_listbox_item(self, index):
+        """리스트박스에서 특정 항목을 선택."""
+        self.label_listbox.selection_clear(0, tk.END)  # 기존 선택 해제
+        self.label_listbox.selection_set(index)       # 새로운 항목 선택
+        self.label_listbox.activate(index)            # 포커스 설정
+        self.label_listbox.see(index)                 # 선택된 항목 보기
+        self.update_canvas()              
+
+    def on_canvas_left_click(self, event):
+        """캔버스에서 오른쪽 클릭으로 노드 또는 연결 선택."""
+        clicked_x = (event.x - self.img_x) / self.scale_factor
+        clicked_y = (event.y - self.img_y) / self.scale_factor
+
+        # 노드 선택 여부 확인
+        for i, node in enumerate(self.nodes):
+            x1, y1, x2, y2 = node['coords']
+            if x1 <= clicked_x <= x2 and y1 <= clicked_y <= y2:
+                # 노드 선택
+                self.selected_node_index = i
+                self.selected_connection_index = None
+                self.select_listbox_item(i)  # 리스트박스와 동기화
+                return
+
+        # 연결 선택 여부 확인
+        for i, connection in enumerate(self.connections):
+            from_node = next((n for n in self.nodes if n['id'] == connection['from']), None)
+            to_node = next((n for n in self.nodes if n['id'] == connection['to']), None)
+            if not from_node or not to_node:
+                continue
+
+            from_center = self.get_center(from_node['coords'])
+            to_center = self.get_center(to_node['coords'])
+            if self.is_point_near_line((clicked_x, clicked_y), from_center, to_center):
+                # 연결 선택
+                self.selected_node_index = None
+                self.selected_connection_index = i
+                self.select_listbox_item(len(self.nodes) + i)  # 리스트박스와 동기화
+                return
+
 
 
     # 오른쪽 클릭으로 노드 이동 시작
@@ -920,7 +994,6 @@ class ImageEditor:
         self.selected_type = tk.StringVar(value="line")  # 기본값 설정
         self.type_menu = tk.OptionMenu(self.right_frame, self.selected_type, *self.type_options, command=self.update_type)
         self.type_menu.pack()
-
 
     def update_type(self, _=None):  # 선택한 옵션을 반영하도록 기본값 매개변수 사용
         selected_index = self.label_listbox.curselection()
