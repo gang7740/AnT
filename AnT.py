@@ -186,6 +186,8 @@ class ImageEditor:
 
         self.label_listbox.bind("<<ListboxSelect>>", self.on_list_select)
 
+        self.root.bind("<Delete>", self.on_key_delete)
+
         # 드래그 상태 변수 추가
         self.dragging_canvas = False
         self.drag_start_x = 0
@@ -844,6 +846,16 @@ class ImageEditor:
             base_name = os.path.splitext(os.path.basename(self.image_path))[0]
             json_path = os.path.join(os.path.dirname(self.image_path), f"{base_name}.json")
 
+            # 기존 JSON 파일에서 summary 값 읽어오기
+            existing_summary = None
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as file:
+                        data = json.load(file)
+                        existing_summary = data.get("summary")
+                except Exception as e:
+                    messagebox.showwarning("Error", f"Failed to load existing summary: {e}")
+
             # 중첩된 노드 구조 생성
             def build_hierarchy(nodes):
                 node_dict = {node['id']: node for node in nodes}
@@ -867,15 +879,28 @@ class ImageEditor:
                 "connections": self.connections                 # color is automatically included in connections
             }
 
-            # JSON 데이터 저장
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+            # 기존 summary 값을 먼저 추가
+            if existing_summary is not None:
+                ordered_data = {"summary": existing_summary}
+                ordered_data.update(data)  # 나머지 데이터를 추가
+            else:
+                ordered_data = data
 
-            messagebox.showinfo("Save JSON", f"JSON 파일이 다음 경로에 저장되었습니다: {json_path}")
+            # JSON 데이터 저장
+            try:
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(ordered_data, f, ensure_ascii=False, indent=4)
+                messagebox.showinfo("Save JSON", f"JSON 파일이 다음 경로에 저장되었습니다: {json_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save JSON file: {e}")
         else:
             messagebox.showwarning("Save Error", "먼저 이미지를 불러오세요.")
 
 
+
+    def on_key_delete(self, event):
+        """Delete 키를 눌렀을 때 선택된 항목 삭제"""
+        self.delete_selected()
 
 
     def delete_selected(self):
