@@ -148,6 +148,30 @@ class ImageEditor:
         self.color_menu = tk.OptionMenu(self.right_frame, self.selected_color, *self.colors.keys(), command=self.change_connection_color)
         self.color_menu.pack()
 
+        # 노드 크기 조절 버튼 추가
+        self.node_size_label = tk.Label(self.right_frame, text="Node Size Adjustment:")
+        self.node_size_label.pack(pady=5)
+        self.node_size_control_frame = tk.Frame(self.right_frame)
+        self.node_size_control_frame.pack(pady=5)
+        self.increase_node_size_btn = tk.Button(self.node_size_control_frame, text="Increase Node Size", command=lambda: self.change_node_size(1.1))
+        self.increase_node_size_btn.pack(side=tk.LEFT, padx=5)
+        self.decrease_node_size_btn = tk.Button(self.node_size_control_frame, text="Decrease Node Size", command=lambda: self.change_node_size(0.9))
+        self.decrease_node_size_btn.pack(side=tk.LEFT, padx=5)
+
+        # 폰트 크기 조절 버튼 추가
+        self.font_size_label = tk.Label(self.right_frame, text="Font Size Adjustment:")
+        self.font_size_label.pack(pady=5)
+        self.font_size_control_frame = tk.Frame(self.right_frame)
+        self.font_size_control_frame.pack(pady=5)
+        self.increase_font_size_btn = tk.Button(self.font_size_control_frame, text="Increase Font Size", command=lambda: self.change_font_size(1))
+        self.increase_font_size_btn.pack(side=tk.LEFT, padx=5)
+        self.decrease_font_size_btn = tk.Button(self.font_size_control_frame, text="Decrease Font Size", command=lambda: self.change_font_size(-1))
+        self.decrease_font_size_btn.pack(side=tk.LEFT, padx=5)
+
+
+        self.font_size = 9
+
+
         # 관계 타입 선택 메뉴
         self.setup_type_selector()
 
@@ -185,7 +209,6 @@ class ImageEditor:
         self.canvas.bind("<Double-1>", self.on_canvas_left_click)
 
         self.label_listbox.bind("<<ListboxSelect>>", self.on_list_select)
-
         self.root.bind("<Delete>", self.on_key_delete)
 
         # 드래그 상태 변수 추가
@@ -218,17 +241,27 @@ class ImageEditor:
         self.selected_item_index = None  # 초기화 추가
 
 
+        # 노드 크기 변경 함수
+    def change_node_size(self, scale_factor):
+        for node in self.nodes:
+            x1, y1, x2, y2 = node['coords']
+            center_x = (x1 + x2) / 2
+            center_y = (y1 + y2) / 2
+            width = (x2 - x1) * scale_factor
+            height = (y2 - y1) * scale_factor
+            node['coords'] = (
+                center_x - width / 2,
+                center_y - height / 2,
+                center_x + width / 2,
+                center_y + height / 2,
+            )
+        self.update_canvas()  # 변경된 내용을 반영하여 캔버스를 다시 그리기
 
-    # def initialize_canvas_events(self):
-    #     """Canvas 이벤트 초기화"""
-    #     self.canvas.bind("<Button-1>", self.on_click)
-    #     self.canvas.bind("<B1-Motion>", self.on_drag)
-    #     self.canvas.bind("<ButtonRelease-1>", self.on_release)
-    #     self.canvas.bind("<Button-3>", self.start_canvas_drag)
-    #     self.canvas.bind("<B3-Motion>", self.on_canvas_drag)
-    #     self.canvas.bind("<ButtonRelease-3>", self.end_canvas_drag)
-    #     self.canvas.bind("<Configure>", self.on_resize)
-      
+    # 폰트 크기 변경 함수
+    def change_font_size(self, change):
+        self.font_size = max(1, self.font_size + change)  # 최소 폰트 크기를 1로 제한
+        self.update_canvas()  # 변경된 내용을 반영하여 캔버스를 다시 그리기
+     
 
     def start_canvas_drag(self, event):
         """마우스 오른쪽 버튼 클릭 시 드래그 시작."""
@@ -703,11 +736,11 @@ class ImageEditor:
             self.original_image = Image.open(self.image_path)
 
             # PNG의 알파 채널을 올바르게 처리하기 위한 설정
-            if self.original_image.mode == "RGBA":
-                # 투명한 부분을 흰색 배경으로 변경하여 알파 채널 문제 해결
-                background = Image.new("RGB", self.original_image.size, (255, 255, 255))
-                background.paste(self.original_image, mask=self.original_image.split()[3])  # 알파 채널 마스크
-                self.original_image = background  # 알파 채널이 제거된 이미지로 설정
+             # 알파 채널이 있는 경우 흰색 배경으로 변환
+            if self.original_image.mode in ("RGBA", "P"):
+                background = Image.new("RGBA", self.original_image.size, (255, 255, 255, 255))  # 흰색 배경
+                background.paste(self.original_image, mask=self.original_image.split()[3])  # 알파 채널 마스크 사용
+                self.original_image = background.convert("RGB")  # 최종적으로 RGB로 변환
             else:
                 self.original_image = self.original_image.convert("RGB")
 
@@ -785,7 +818,7 @@ class ImageEditor:
                 (scaled_coords[0] + scaled_coords[2]) / 2,
                 (scaled_coords[1] + scaled_coords[3]) / 2,
                 text=node_info["text"],
-                font=("Arial", 12)
+                font=("Arial", self.font_size)
             )
 
         # 연결 그리기
@@ -825,7 +858,7 @@ class ImageEditor:
             if connection['text']:
                 mid_x = (scaled_from_center[0] + scaled_to_center[0]) / 2
                 mid_y = (scaled_from_center[1] + scaled_to_center[1]) / 2
-                self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue", font=("Arial", 12))
+                self.canvas.create_text(mid_x, mid_y, text=connection['text'], fill="blue", font=("Arial", self.font_size))
 
 
 
