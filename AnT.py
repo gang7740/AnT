@@ -956,7 +956,7 @@ class ImageEditor:
                 self.connections = [conn for conn in self.connections if conn['from'] != node_id and conn['to'] != node_id]
                 self.nodes.pop(node_index)
                 self.label_listbox.delete(0, tk.END)
-                self.update_label_listbox()
+
             else:
                 messagebox.showerror("Error", "선택한 노드를 삭제할 수 없습니다.")
         elif item_text.startswith("Connection("):
@@ -965,10 +965,11 @@ class ImageEditor:
             if 0 <= connection_index < len(self.connections):  # 인덱스가 범위 내에 있는지 확인
                 self.connections.pop(connection_index)
                 self.label_listbox.delete(0, tk.END)
-                self.update_label_listbox()
+
             else:
                 messagebox.showerror("Error", "선택한 연결을 삭제할 수 없습니다.")
 
+        self.update_label_listbox()
         self.update_canvas()
 
 
@@ -1114,6 +1115,7 @@ class ImageEditor:
             # 리스트박스에 표시할 텍스트 설정 (화면에는 줄바꿈 그대로 표시)
             display_text = f"Connection({connection_id}): {from_node_id} → {to_node_id} ({connection_text_display}) [Type: {connection_type}] [Color: {color_name}]"
             self.label_listbox.insert(tk.END, display_text)
+            self.update_label_listbox()
 
         # 선택 해제 및 업데이트
         self.selected_nodes = []
@@ -1217,9 +1219,10 @@ class ImageEditor:
                     self.label_listbox.selection_clear(0, tk.END)
                     self.label_listbox.selection_set(tk.END)
                     self.selected_item_index = len(self.nodes) - 1
-
+                    self.update_label_listbox()
                     self.update_canvas()
 
+        
         self.dragging = False
         self.start_x = None
         self.start_y = None
