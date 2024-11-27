@@ -551,6 +551,11 @@ class ImageEditor:
             if image_path:
                 self.image_path = image_path
                 self.original_image = Image.open(self.image_path)
+                if self.original_image.mode in ("RGBA", "LA") or (self.original_image.mode == "P" and "transparency" in self.original_image.info):
+                    # 알파 채널이 있는 이미지를 불러올 때 투명한 부분을 흰색으로 채우지 않고 그대로 유지
+                    alpha = self.original_image.convert("RGBA").split()[-1]
+                    background = Image.new("RGBA", self.original_image.size, (255, 255, 255, 0))
+                    self.original_image = Image.composite(self.original_image, background, alpha)
                 self.update_image()  # Canvas 크기와 이미지를 동기화
                 self.file_name_label.config(text=f"File: {os.path.basename(self.image_path)}")  # 파일명 업데이트
             else:
