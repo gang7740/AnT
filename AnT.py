@@ -7,7 +7,6 @@ import uuid
 import random
 import string
 
-
 # Define a custom multi-line text input dialog
 class MultiLineInputDialog:
     def __init__(self, parent, title="Input", initial_text=""):
@@ -61,6 +60,22 @@ class ImageEditor:
         self.root = root
         self.root.title("Image Drawing with Nodes")
 
+        # 최상단 프레임 추가
+        self.title_frame = tk.Frame(self.root)
+        self.title_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # 현재 작업 중인 이미지 파일명을 표시할 라벨
+        self.file_name_label = tk.Label(self.title_frame, text="No file loaded", font=("Arial", 16))
+        self.file_name_label.pack(side=tk.LEFT, padx=10)
+
+         # 이전 JSON 버튼 추가
+        self.prev_json_button = Button(self.title_frame, text="Previous JSON", command=self.load_previous_json)
+        self.prev_json_button.pack(side=tk.RIGHT, padx=5)
+
+        # 다음 JSON 버튼 추가
+        self.next_json_button = Button(self.title_frame, text="Next JSON", command=self.load_next_json)
+        self.next_json_button.pack(side=tk.RIGHT, padx=5)
+
         # 메뉴 바 설정
         menubar = tk.Menu(root)
         root.config(menu=menubar)
@@ -73,14 +88,25 @@ class ImageEditor:
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_closing)
 
+        # 윈도우 기본 버튼 추가
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)  # 창 닫기 버튼
+        self.root.resizable(True, True)  # 창 크기 조절 가능하도록
+
+        # 창 최대화/최소화 버튼 추가
+        # self.maximize_button = tk.Button(self.title_frame, text="Maximize", command=self.toggle_fullscreen)
+        # self.maximize_button.pack(side=tk.RIGHT, padx=10)
+        # self.minimize_button = tk.Button(self.title_frame, text="Minimize", command=self.minimize_window)
+        # self.minimize_button.pack(side=tk.RIGHT, padx=10)
+
         # 상단 프레임 (메뉴 바 아래)
         self.top_frame = tk.Frame(root)
         self.top_frame.pack(side=tk.TOP, fill=tk.X)
 
+     
+
         # PanedWindow로 레이아웃 변경 (캔버스와 리스트박스 조정 가능)
         self.main_paned = tk.PanedWindow(root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True)
-
        
 
         # 왼쪽 프레임 (캔버스 포함)
@@ -419,11 +445,15 @@ class ImageEditor:
             self.update_canvas()
 
 
-
     def load_json(self):
         json_path = filedialog.askopenfilename(filetypes=[("JSON Files", "*.json")])
         if not json_path:
             return  # 파일 선택 취소 시 종료
+        self.current_json_path = json_path
+        self.load_json_file(json_path)
+
+
+    def load_json_file(self, json_path):
         try:
             # JSON 파일에서 데이터 로드
             with open(json_path, 'r', encoding='utf-8') as file:
@@ -522,6 +552,7 @@ class ImageEditor:
                 self.image_path = image_path
                 self.original_image = Image.open(self.image_path)
                 self.update_image()  # Canvas 크기와 이미지를 동기화
+                self.file_name_label.config(text=f"File: {os.path.basename(self.image_path)}")  # 파일명 업데이트
             else:
                 messagebox.showwarning("Image Missing", "The corresponding image file could not be found with common extensions (.png, .jpg, .jpeg, .bmp, .gif).")
 
@@ -726,6 +757,7 @@ class ImageEditor:
     def load_image(self):
         self.image_path = filedialog.askopenfilename()
         if self.image_path:
+            self.file_name_label.config(text=f"File: {os.path.basename(self.image_path)}")  # 파일명 업데이트
             # 새로운 이미지를 불러오면 기존 데이터 초기화
             self.nodes.clear()
             self.connections.clear()
@@ -745,6 +777,19 @@ class ImageEditor:
                 self.original_image = self.original_image.convert("RGB")
 
             self.update_image()
+    
+    def toggle_fullscreen(self):
+        """전체 화면 모드로 전환하거나 원래 창 크기로 복원합니다."""
+        is_fullscreen = self.root.attributes("-fullscreen")
+        self.root.attributes("-fullscreen", not is_fullscreen)
+        if is_fullscreen:
+            self.maximize_button.config(text="Maximize")
+        else:
+            self.maximize_button.config(text="Restore")
+
+    def minimize_window(self):
+        """창을 최소화합니다."""
+        self.root.iconify()
 
 
     def update_image(self):
@@ -1139,6 +1184,10 @@ class ImageEditor:
                         self.highlight_node(clicked_node)
                 if len(self.selected_nodes) == 2:
                     self.create_connection()
+            else:
+                # 클릭한 위치에 노드가 없는 경우 선택 초기화
+                self.selected_nodes = []
+                self.canvas.delete("highlight")
         elif current_mode == "draw":
             clicked_node = self.get_node_at(event.x, event.y)
             
@@ -1238,13 +1287,39 @@ class ImageEditor:
             if x1 <= nx1 <= x2 and y1 <= ny1 <= y2 and x1 <= nx2 <= x2 and y1 <= ny2 <= y2:
                 enclosed_nodes.append(node)
         return enclosed_nodes
+    
+    def load_next_json(self):
+        """현재 폴더 내에서 이름 순으로 다음 JSON 파일을 로드"""
+        if not self.current_json_path:
+            messagebox.showinfo("Info", "No JSON file is currently loaded.")
+            return
+        directory = os.path.dirname(self.current_json_path)
+        all_files = sorted([f for f in os.listdir(directory) if f.endswith('.json')])
+        current_index = all_files.index(os.path.basename(self.current_json_path))
+        next_index = (current_index + 1) % len(all_files)
+        next_json_path = os.path.join(directory, all_files[next_index])
+        self.current_json_path = next_json_path
+        self.load_json_file(next_json_path)
+
+    def load_previous_json(self):
+        """현재 폴더 내에서 이름 순으로 이전 JSON 파일을 로드"""
+        if not self.current_json_path:
+            messagebox.showinfo("Info", "No JSON file is currently loaded.")
+            return
+        directory = os.path.dirname(self.current_json_path)
+        all_files = sorted([f for f in os.listdir(directory) if f.endswith('.json')])
+        current_index = all_files.index(os.path.basename(self.current_json_path))
+        prev_index = (current_index - 1) % len(all_files)
+        prev_json_path = os.path.join(directory, all_files[prev_index])
+        self.current_json_path = prev_json_path
+        self.load_json_file(prev_json_path)
 
 
 
 if __name__ == "__main__":
     root = tk.Tk()
     # 전체화면 모드 설정
-    root.attributes("-fullscreen", True)
+    # root.attributes("-fullscreen", True)
 
     app = ImageEditor(root)
     root.mainloop()
